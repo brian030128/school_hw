@@ -1,0 +1,5 @@
+found!!
+[(2, 20), (3, 20), (3, 20)]
+0
+0
+Not able to win in this round.
