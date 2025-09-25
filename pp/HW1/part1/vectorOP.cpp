@@ -94,23 +94,40 @@ void clampedExpVector(float *values, int *exponents, float *output, int N)
 // You can assume VECTOR_WIDTH is a power of 2
 float arraySumVector(float *values, int N)
 {
-  PPLogger.refresh();
-  //
-  // PP STUDENTS TODO: Implement your vectorized version of arraySumSerial here
-  //
-  float total=0;
-  __pp_vec_float x;
-  __pp_mask mask = _pp_init_ones();
-  for (int i = 0; i < N; i += VECTOR_WIDTH)
-  {
-    _pp_vload_float(x, &values[i], mask);
-    int w = VECTOR_WIDTH;
-    while(w > 1){
-      w /= 2;
-      _pp_hadd_float(x, x);
-      _pp_interleave_float(x, x);
+    float total = 0;
+    __pp_vec_float x;
+    __pp_mask mask;
+    
+    int i;
+    // Process full vectors
+    for (i = 0; i <= N - VECTOR_WIDTH; i += VECTOR_WIDTH)
+    {
+        mask = _pp_init_ones();  // All elements valid
+        _pp_vload_float(x, &values[i], mask);
+        
+        int w = VECTOR_WIDTH;
+        while(w > 1){
+            w /= 2;
+            _pp_hadd_float(x, x);
+            _pp_interleave_float(x, x);
+        }
+        total += x.value[0];
     }
-    total += x.value[0];
-  }
-  return total;
+    
+    // Handle remaining elements
+    if (i < N) {
+        int remaining = N - i;
+        mask = _pp_init_ones(remaining);  // Only 'remaining' elements valid
+        _pp_vload_float(x, &values[i], mask);
+        
+        int w = VECTOR_WIDTH;
+        while(w > 1){
+            w /= 2;
+            _pp_hadd_float(x, x);
+            _pp_interleave_float(x, x);
+        }
+        total += x.value[0];
+    }
+    
+    return total;
 }
