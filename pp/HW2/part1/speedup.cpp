@@ -18,7 +18,7 @@ int num_threads;
 
 pthread_mutex_t mutex_lock;
 
-#define RADIUS (2<<15)
+#define RADIUS (2<<14)
 
 void* toss(void* arg) {
     long long thread_id = (long long)arg;
