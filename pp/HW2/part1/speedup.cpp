@@ -31,7 +31,7 @@ void *toss(void *arg) {
     long long tosses_per_thread = total_tosses / num_threads;
     if (thread_id == num_threads - 1)
         tosses_per_thread += total_tosses % num_threads;
-    long long local_count = 0;
+    float local_count = 0.0f;
 
     SEFUtility::RNG::Xoshiro256PlusSIMD8 rng(thread_id);
     alignas(32) float result[8];
@@ -55,10 +55,10 @@ void *toss(void *arg) {
     _mm256_store_ps(result, in_circle);
     // explicit conversion is important
     // long long 64-bit will be implicitly convert to float 32-bit if not specify
-    local_count += (short) result[0];
+    local_count += result[0];
   }
 
-    //global_count.fetch_add(local_count, memory_order_relaxed);
+    global_count.fetch_add((long long)local_count, memory_order_relaxed);
   return nullptr;
 }
 int main(int argc, char* argv[]) {
