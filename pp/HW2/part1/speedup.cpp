@@ -29,7 +29,7 @@ void *toss(void *arg) {
         tosses_per_thread += total_tosses % num_threads;
     long long local_count = 0;
 
-    SEFUtility::RNG::Xoshiro256PlusSIMD8 rng(123 + thread_id);
+    SEFUtility::RNG::Xoshiro256PlusSIMD8 rng(thread_id);
     alignas(32) float result[8];
     int runs = tosses_per_thread / 8 + (tosses_per_thread % 8 == 0 ? 0 : 1);
 
@@ -54,9 +54,9 @@ void *toss(void *arg) {
     local_count += (short) result[0];
   }
 
-    pthread_mutex_lock(&mutex_lock);
-    global_count += local_count;
-    pthread_mutex_unlock(&mutex_lock);
+    //pthread_mutex_lock(&mutex_lock);
+    //global_count += local_count;
+    //pthread_mutex_unlock(&mutex_lock);
   return nullptr;
 }
 int main(int argc, char* argv[]) {
