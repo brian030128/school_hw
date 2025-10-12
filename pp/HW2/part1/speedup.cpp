@@ -36,6 +36,7 @@ void *toss(void *arg) {
     const __m256 ones = _mm256_set1_ps(1.0f);
   for (long long i = 0; i < runs; i++) { // perform 8 toss at a time
     __m256 x = rng.next8().result_packed_;
+    cout << "generated " << endl;
     __m256 y = rng.next8().result_packed_;
 
     __m256 dist = _mm256_add_ps(_mm256_mul_ps(x, x), _mm256_mul_ps(y, y));
