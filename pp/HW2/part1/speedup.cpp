@@ -16,6 +16,8 @@ int num_threads;
 
 #include "Xoshiro256Plus.h"
 
+#define __AVX2_AVAILABLE__
+
 pthread_mutex_t mutex_lock;
 
 #define RADIUS (2<<14)
@@ -31,12 +33,12 @@ void *toss(void *arg) {
     alignas(32) float result[8];
     int runs = tosses_per_thread / 8 + (tosses_per_thread % 8 == 0 ? 0 : 1);
 
-    const __m256d ones = _mm256_set1_pd(1.0f);
+    const __m256 ones = _mm256_set1_ps(1.0f);
   for (long long i = 0; i < runs; i++) { // perform 8 toss at a time
-    alignas(32)  __m256d x = rng.dnext4().result_packed_;
-    alignas(32)  __m256d y = rng.dnext4().result_packed_;
+    alignas(32)  __m256 x = rng.fnext8().result_packed_;
+    alignas(32)  __m256 y = rng.fnext8().result_packed_;
 
-    __m256d dist = _mm256_add_pd(_mm256_mul_pd(x, x), _mm256_mul_pd(y, y));
+    __m256d dist = _mm256_add_ps(_mm256_mul_ps(x, x), _mm256_mul_ps(y, y));
     __m256 in_circle_mask = _mm256_cmp_pd(dist, ones, _CMP_LE_OS);
 
     __m256d in_circle = _mm256_and_ps(ones, in_circle_mask); // a1, a2, a3, a4, a5, a6, a7, a8
