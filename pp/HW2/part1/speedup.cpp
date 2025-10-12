@@ -29,7 +29,7 @@ void *toss(void *arg) {
         tosses_per_thread += total_tosses % num_threads;
     long long local_count = 0;
 
-    SEFUtility::RNG::Xoshiro256Plus<SIMDInstructionSet::AVX2> rng(123 + thread_id);
+    SEFUtility::RNG::Xoshiro256PlusSIMD8 rng(123 + thread_id);
     alignas(32) float result[4];
     int runs = tosses_per_thread / 4 + (tosses_per_thread % 4 == 0 ? 0 : 1);
 
