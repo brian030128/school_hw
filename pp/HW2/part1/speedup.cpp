@@ -31,7 +31,7 @@ void *toss(void *arg) {
     long long tosses_per_thread = total_tosses / num_threads;
     if (thread_id == num_threads - 1)
         tosses_per_thread += total_tosses % num_threads;
-    float local_count = 0.0f;
+    double local_count = 0.0f;
 
     SEFUtility::RNG::Xoshiro256PlusSIMD8 rng(thread_id);
     alignas(32) float result[8];
