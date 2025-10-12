@@ -58,7 +58,7 @@ void *toss(void *arg) {
     local_count += (short) result[0];
   }
 
-    global_count.fetch_add(local_count, memory_order_relaxed);
+    //global_count.fetch_add(local_count, memory_order_relaxed);
   return nullptr;
 }
 int main(int argc, char* argv[]) {
