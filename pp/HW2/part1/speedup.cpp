@@ -52,9 +52,9 @@ void* toss(void* arg) {
     }
 
     // Thread-safe update
-    pthread_mutex_lock(&mutex);
+    pthread_mutex_lock(&mutex_lock);
     global_count += local_count;
-    pthread_mutex_unlock(&mutex);
+    pthread_mutex_unlock(&mutex_lock);
 
     return nullptr;
 }
