@@ -45,7 +45,7 @@ namespace SEFUtility::RNG
                 return reinterpret_cast<const float*>(&result_packed_)[index];
             }
 
-        private:
+        public:
             alignas(32) __m256 result_packed_;
 
             EightFloatValues(__m256 value) : result_packed_(value) {}
