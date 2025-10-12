@@ -55,9 +55,9 @@ void *toss(void *arg) {
     local_count += (short) result[0];
   }
 
-    //pthread_mutex_lock(&mutex_lock);
+    pthread_mutex_lock(&mutex_lock);
     global_count += local_count;
-    //pthread_mutex_unlock(&mutex_lock);
+    pthread_mutex_unlock(&mutex_lock);
   return nullptr;
 }
 int main(int argc, char* argv[]) {
