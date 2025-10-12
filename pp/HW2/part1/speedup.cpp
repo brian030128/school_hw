@@ -39,7 +39,7 @@ void *toss(void *arg) {
     __m256 y = rng.next8().result_packed_;
 
     __m256 dist = _mm256_add_ps(_mm256_mul_ps(x, x), _mm256_mul_ps(y, y));
-    __m256 in_circle_mask = _mm256_cmp_pd(dist, ones, _CMP_LE_OS);
+    __m256 in_circle_mask = _mm256_cmp_ps(dist, ones, _CMP_LE_OS);
 
     __m256 in_circle = _mm256_and_ps(ones, in_circle_mask); // a1, a2, a3, a4, a5, a6, a7, a8
     __m256 in_circle_permute = _mm256_permute2f128_ps(in_circle, in_circle, 1); // a5, a6, a7, a8, a1, a2, a3, a4
