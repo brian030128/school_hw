@@ -27,7 +27,7 @@ See <http://creativecommons.org/publicdomain/zero/1.0/>. */
     Stephan Friedl
     Derived from Public Domain code
     
-    Modified to be SIMD-only 8x uint32 generator
+    Modified to be SIMD-only 8x float generator
 */
 
 /*
@@ -52,32 +52,32 @@ namespace SEFUtility::RNG
     class Xoshiro256PlusSIMD8
     {
     public:
-        class EightIntegerValues
+        class EightFloatValues
         {
         public:
-            EightIntegerValues& operator=(EightIntegerValues) = delete;
-            EightIntegerValues& operator=(const EightIntegerValues&) = delete;
-            EightIntegerValues& operator=(EightIntegerValues&&) = delete;
+            EightFloatValues& operator=(EightFloatValues) = delete;
+            EightFloatValues& operator=(const EightFloatValues&) = delete;
+            EightFloatValues& operator=(EightFloatValues&&) = delete;
 
-            operator __m256i() const { return result_packed_; }
+            operator __m256() const { return result_packed_; }
 
-            uint32_t operator[](size_t index) const 
+            float operator[](size_t index) const 
             { 
                 assert(index < 8);
-                return reinterpret_cast<const uint32_t*>(&result_packed_)[index];
+                return reinterpret_cast<const float*>(&result_packed_)[index];
             }
 
-        public:
-            alignas(32) __m256i result_packed_;
+        private:
+            alignas(32) __m256 result_packed_;
 
-            EightIntegerValues(__m256i value) : result_packed_(value) {}
+            EightFloatValues(__m256 value) : result_packed_(value) {}
 
-            EightIntegerValues(EightIntegerValues&& value_to_copy)
+            EightFloatValues(EightFloatValues&& value_to_copy)
                 : result_packed_(std::move(value_to_copy.result_packed_))
             {
             }
 
-            EightIntegerValues(const EightIntegerValues&) = delete;
+            EightFloatValues(const EightFloatValues&) = delete;
 
             friend class Xoshiro256PlusSIMD8;
         };
@@ -120,46 +120,21 @@ namespace SEFUtility::RNG
         {
         }
 
-        // Generate 8 uint32_t values at once (packed in one __m256i)
-        EightIntegerValues next8()
+        // Generate 8 float values in range [0, 1)
+        EightFloatValues next8()
         {
             return simd_next8_internal(simd_state_);
         }
 
-        // Generate 8 bounded uint32_t values in range [lower_bound, upper_bound)
-        EightIntegerValues next8(uint32_t lower_bound, uint32_t upper_bound)
+        // Generate 8 float values in range [lower_bound, upper_bound)
+        EightFloatValues next8(float lower_bound, float upper_bound)
         {
-            assert(upper_bound > lower_bound);
-
-            uint64_t range = upper_bound - lower_bound;
+            __m256 values = simd_next8_internal(simd_state_);
+            __m256 range = _mm256_set1_ps(upper_bound - lower_bound);
+            __m256 lower = _mm256_set1_ps(lower_bound);
             
-            // Get 8 uint64 values from the two SIMD lanes
-            __m256i values_low = simd_next4_uint64_internal(simd_state_);
-            __m256i values_high = simd_next4_uint64_internal(simd_state_);
-
-            __m256i range_vec = _mm256_set1_epi64x(range);
-            __m256i lower_vec = _mm256_set1_epi64x(lower_bound);
-
-            // Compute bounded values: ((uint32_t(value) * range) >> 32) + lower_bound
-            __m256i bounded_low = _mm256_add_epi64(
-                _mm256_srli_epi64(_mm256_mul_epu32(values_low, range_vec), 32),
-                lower_vec);
-
-            __m256i bounded_high = _mm256_add_epi64(
-                _mm256_srli_epi64(_mm256_mul_epu32(values_high, range_vec), 32),
-                lower_vec);
-
-            // Pack 4 uint64 -> 4 uint32 for each lane
-            // Extract lower 32 bits from each 64-bit value and pack them
-            __m256i shuffled_low = _mm256_shuffle_epi32(bounded_low, _MM_SHUFFLE(2, 0, 2, 0));
-            __m256i shuffled_high = _mm256_shuffle_epi32(bounded_high, _MM_SHUFFLE(2, 0, 2, 0));
-
-            // Combine: take lower 128 bits from each
-            __m128i low_128 = _mm256_castsi256_si128(shuffled_low);
-            __m128i high_128 = _mm256_castsi256_si128(shuffled_high);
-
-            // Interleave to get 8 uint32 values in one __m256i
-            return _mm256_set_m128i(high_128, low_128);
+            // result = values * range + lower_bound
+            return _mm256_add_ps(_mm256_mul_ps(values, range), lower);
         }
 
         // Jump functions for creating independent generator streams
@@ -218,6 +193,13 @@ namespace SEFUtility::RNG
         }
 
     private:
+        // Constants for float conversion
+        // IEEE 754 float: sign(1) | exponent(8) | mantissa(23)
+        // We want to create floats in [1.0, 2.0) then subtract 1.0 to get [0.0, 1.0)
+        // 1.0 in float = 0x3F800000 (exponent = 127)
+        static constexpr uint32_t FLOAT_MASK = 0x3F800000u;  // 1.0f
+        static constexpr uint32_t MANTISSA_MASK = 0x007FFFFFu;  // 23 bits for mantissa
+
         class alignas(32) SIMDState
         {
         public:
@@ -293,23 +275,40 @@ namespace SEFUtility::RNG
             return result;
         }
 
-        // Generate 8 uint32 values packed in one __m256i
-        static EightIntegerValues simd_next8_internal(SIMDState& state)
+        // Generate 8 float values in [0, 1) packed in one __m256
+        static EightFloatValues simd_next8_internal(SIMDState& state)
         {
             // Get 8 uint64 values (two SIMD operations)
             __m256i values_low = simd_next4_uint64_internal(state);
             __m256i values_high = simd_next4_uint64_internal(state);
 
-            // Extract lower 32 bits from each 64-bit value
-            // Shuffle to pack: [a0, _, a1, _, a2, _, a3, _] -> [a0, a1, a2, a3, ...]
-            __m256i shuffled_low = _mm256_shuffle_epi32(values_low, _MM_SHUFFLE(2, 0, 2, 0));
-            __m256i shuffled_high = _mm256_shuffle_epi32(values_high, _MM_SHUFFLE(2, 0, 2, 0));
+            // Use upper 32 bits from each uint64 for better quality
+            // Shift right by 32 to get upper 32 bits
+            __m256i upper_low = _mm256_srli_epi64(values_low, 32);
+            __m256i upper_high = _mm256_srli_epi64(values_high, 32);
 
-            // Pack the two 128-bit halves into one 256-bit register
+            // Pack 4 uint32 from each into 8 uint32 total
+            __m256i shuffled_low = _mm256_shuffle_epi32(upper_low, _MM_SHUFFLE(2, 0, 2, 0));
+            __m256i shuffled_high = _mm256_shuffle_epi32(upper_high, _MM_SHUFFLE(2, 0, 2, 0));
+
             __m128i low_128 = _mm256_castsi256_si128(shuffled_low);
             __m128i high_128 = _mm256_castsi256_si128(shuffled_high);
+            
+            __m256i packed_uint32 = _mm256_set_m128i(high_128, low_128);
 
-            return _mm256_set_m128i(high_128, low_128);
+            // Convert to float [0, 1):
+            // 1. Take upper 23 bits for mantissa (right shift by 9)
+            // 2. OR with 0x3F800000 (creates float in [1.0, 2.0))
+            // 3. Subtract 1.0 to get [0.0, 1.0)
+            
+            __m256i mantissa = _mm256_srli_epi32(packed_uint32, 9);
+            __m256i float_bits = _mm256_or_si256(mantissa, _mm256_set1_epi32(FLOAT_MASK));
+            
+            // Reinterpret as float and subtract 1.0
+            __m256 result = _mm256_castsi256_ps(float_bits);
+            result = _mm256_sub_ps(result, _mm256_set1_ps(1.0f));
+
+            return result;
         }
 
         static uint64_t next_scalar(std::array<uint64_t, 4>& state)

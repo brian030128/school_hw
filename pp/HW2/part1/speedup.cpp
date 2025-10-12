@@ -33,15 +33,15 @@ void *toss(void *arg) {
     alignas(32) float result[8];
     int runs = tosses_per_thread / 8 + (tosses_per_thread % 8 == 0 ? 0 : 1);
 
-    const __m256 ones = _mm256_set1_ps(1.0f);
+    const __m256i ones = _mm256_set1_ps(1.0f);
   for (long long i = 0; i < runs; i++) { // perform 8 toss at a time
-    alignas(32)  __m256 x = rng.next8().result_packed_;
-    alignas(32)  __m256 y = rng.next8().result_packed_;
+    __m256 x = rng.next8().result_packed_;
+    __m256 y = rng.next8().result_packed_;
 
-    __m256d dist = _mm256_add_ps(_mm256_mul_ps(x, x), _mm256_mul_ps(y, y));
+    __m256 dist = _mm256_add_ps(_mm256_mul_ps(x, x), _mm256_mul_ps(y, y));
     __m256 in_circle_mask = _mm256_cmp_pd(dist, ones, _CMP_LE_OS);
 
-    __m256d in_circle = _mm256_and_ps(ones, in_circle_mask); // a1, a2, a3, a4, a5, a6, a7, a8
+    __m256 in_circle = _mm256_and_ps(ones, in_circle_mask); // a1, a2, a3, a4, a5, a6, a7, a8
     __m256 in_circle_permute = _mm256_permute2f128_pd(in_circle, in_circle, 1); // a5, a6, a7, a8, a1, a2, a3, a4
 
     in_circle = _mm256_hadd_ps(in_circle, in_circle_permute); // a1+a2, a3+a4, a5+a6, a7+a8, ....
