@@ -28,24 +28,36 @@ void* toss(void* arg) {
 
     long long local_count = 0;
     SEFUtility::RNG::Xoshiro256Plus<SIMDInstructionSet::AVX2> rng(123 + thread_id);
-    SEFUtility::RNG::Xoshiro256Plus<SIMDInstructionSet::AVX2>::FourIntegerValues rng_values;
 
-
-    for (long long i = 0; i < tosses_per_thread; i++) {
-        int n = i % 2;
-        if(n == 0)
-            rng_values = rng.next4(0, RADIUS);
-        int x = rng_values.result_packed_[n * 2];
-        int y = rng_values.result_packed_[n * 2 + 1];
-        if (x * x + y * y <= RADIUS * RADIUS)  
+    // Process 4 tosses at a time
+    long long i;
+    for (i = 0; i + 3 < tosses_per_thread; i += 4) {
+        auto rng_values = rng.next4(0, RADIUS);
+        
+        // Process all 4 values
+        for (int j = 0; j < 4; j++) {
+            int x = rng_values[j * 2];      // x values at even indices
+            int y = rng_values[j * 2 + 1];  // y values at odd indices
+            if (x * x + y * y <= RADIUS * RADIUS)
+                local_count++;
+        }
+    }
+    
+    // Handle remaining tosses (if tosses_per_thread not divisible by 4)
+    for (; i < tosses_per_thread; i++) {
+        int x = rng.next(0, RADIUS);
+        int y = rng.next(0, RADIUS);
+        if (x * x + y * y <= RADIUS * RADIUS)
             local_count++;
     }
 
+    // Thread-safe update
+    pthread_mutex_lock(&mutex);
     global_count += local_count;
+    pthread_mutex_unlock(&mutex);
 
     return nullptr;
 }
-
 int main(int argc, char* argv[]) {
     if (argc != 3) {
         cerr << "Usage: " << argv[0] << " <number_of_threads> <number_of_tosses>" << endl;
