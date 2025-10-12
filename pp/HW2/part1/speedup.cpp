@@ -4,6 +4,7 @@
 #include <ctime>
 #include <cmath>
 #include <chrono>
+#include <random>
 
 using namespace std;
 
@@ -13,23 +14,10 @@ int num_threads;
 
 pthread_mutex_t mutex_lock;
 
-struct Wyrand {
-    uint64_t s;
-    
-    inline void seed(uint64_t seed) { 
-        s = seed; 
-    }
-    
-    inline uint64_t next() {
-        s += 0xa0761d6478bd642full;
-        __uint128_t tmp = (__uint128_t)s * (s ^ 0xe7037ed1a0b428dbull);
-        return (tmp >> 64) ^ tmp;
-    }
-    
-    inline double next_double() {
-        return (next() >> 11) * 0x1.0p-53;
-    }
-};
+thread_local std::mt19937 gen(std::random_device{}());
+thread_local std::uniform_int_distribution<int> dist(1, 1000);
+
+#define RADIUS_SQUARE 1000000 
 
 void* toss(void* arg) {
     long long thread_id = (long long)arg;
@@ -37,15 +25,11 @@ void* toss(void* arg) {
     if (thread_id == num_threads - 1)
         tosses_per_thread += total_tosses % num_threads;
 
-    Wyrand rng;
-    uint64_t seed = chrono::high_resolution_clock::now().time_since_epoch().count();
-    rng.seed(seed ^ (thread_id + 0x9e3779b97f4a7c15ULL));
-
     long long local_count = 0;
     for (long long i = 0; i < tosses_per_thread; i++) {
-        double x = rng.next_double() * 2.0 - 1.0;
-        double y = rng.next_double() * 2.0 - 1.0;
-        if (x * x + y * y <= 1.0)
+        int x = dist(gen);
+        int y = dist(gen);
+        if (x * x + y * y <= RADIUS_SQUARE)
             local_count++;
     }
 
