@@ -89,7 +89,7 @@ int main(int argc, char* argv[]) {
     double seconds = chrono::duration<double>(end - start).count();
 
     pthread_mutex_destroy(&mutex_lock);
-    delete[] threads;
+    //delete[] threads;
 
     double pi_estimate = 4.0 * (double)global_count / (double)total_tosses;
     cout.precision(12);
