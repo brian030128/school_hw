@@ -22,12 +22,6 @@ pthread_mutex_t mutex_lock;
 
 #define RADIUS (2<<14)
 
-long long gca1 = 0;
-long long gca2 = 0;
-long long gca3 = 0;
-long long gca4 = 0;
-long long gca5 = 0;
-long long gca6 = 0;
 
 void *toss(void *arg) {
     long long thread_id = (long long)arg;
@@ -62,14 +56,7 @@ void *toss(void *arg) {
   }
 
     //pthread_mutex_lock(&mutex_lock);
-    switch (thread_id) {
-        case 0: gca1 += local_count; break;
-        case 1: gca2 += local_count; break;
-        case 2: gca3 += local_count; break;
-        case 3: gca4 += local_count; break;
-        case 4: gca5 += local_count; break;
-        case 5: gca6 += local_count; break;
-    }
+    global_count += local_count;
     //pthread_mutex_unlock(&mutex_lock);
   return nullptr;
 }
@@ -102,9 +89,7 @@ int main(int argc, char* argv[]) {
     double seconds = chrono::duration<double>(end - start).count();
 
     pthread_mutex_destroy(&mutex_lock);
-    delete[] threads;
-
-    global_count = gca1 + gca2 + gca3 + gca4 + gca5 + gca6;
+    //delete[] threads;
 
     double pi_estimate = 4.0 * (double)global_count / (double)total_tosses;
     cout.precision(12);
