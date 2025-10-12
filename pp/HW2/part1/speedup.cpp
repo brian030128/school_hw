@@ -30,8 +30,8 @@ void *toss(void *arg) {
     long long local_count = 0;
 
     SEFUtility::RNG::Xoshiro256PlusSIMD8 rng(123 + thread_id);
-    alignas(32) float result[4];
-    int runs = tosses_per_thread / 4 + (tosses_per_thread % 4 == 0 ? 0 : 1);
+    alignas(32) float result[8];
+    int runs = tosses_per_thread / 8 + (tosses_per_thread % 8 == 0 ? 0 : 1);
 
     const __m256 ones = _mm256_set1_ps(1.0f);
   for (long long i = 0; i < runs; i++) { // perform 8 toss at a time
