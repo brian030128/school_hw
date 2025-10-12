@@ -65,7 +65,7 @@ namespace SEFUtility::RNG
 
             uint64_t operator[](size_t index) const { return result_packed_[index]; }
 
-           private:
+           public:
             alignas(32) __m256i result_packed_;
 
             FourIntegerValues(uint64_t value1, uint64_t value2, uint64_t value3, uint64_t value4)
@@ -109,7 +109,7 @@ namespace SEFUtility::RNG
 
             double operator[](size_t index) const { return result_packed_[index]; }
 
-           private:
+           public:
             alignas(32) __m256d result_packed_;
 
 #ifdef __AVX2_AVAILABLE__

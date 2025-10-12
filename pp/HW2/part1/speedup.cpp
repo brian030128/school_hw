@@ -33,8 +33,8 @@ void *toss(void *arg) {
 
     const __m256 ones = _mm256_set1_ps(1.0f);
   for (long long i = 0; i < runs; i++) { // perform 8 toss at a time
-    alignas(32)  __m256 x = rng.dnext4().operator __m256i();
-    alignas(32)  __m256 y = rng.dnext4().operator __m256i();
+    alignas(32)  __m256 x = rng.dnext4().result_packed_;
+    alignas(32)  __m256 y = rng.dnext4().result_packed_;
 
     __m256 dist = _mm256_add_ps(_mm256_mul_ps(x, x), _mm256_mul_ps(y, y));
     __m256 in_circle_mask = _mm256_cmp_ps(dist, ones, _CMP_LE_OS);
