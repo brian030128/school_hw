@@ -13,19 +13,21 @@ int num_threads;
 
 pthread_mutex_t mutex_lock;
 
-struct XorShift128Plus {
-    uint64_t s[2];
-    inline uint64_t next() {
-        uint64_t x = s[0];
-        const uint64_t y = s[1];
-        s[0] = y;
-        x ^= x << 23;
-        s[1] = x ^ y ^ (x >> 17) ^ (y >> 26);
-        return s[1] + y;
+struct Wyrand {
+    uint64_t s;
+    
+    inline void seed(uint64_t seed) { 
+        s = seed; 
     }
+    
+    inline uint64_t next() {
+        s += 0xa0761d6478bd642full;
+        __uint128_t tmp = (__uint128_t)s * (s ^ 0xe7037ed1a0b428dbull);
+        return (tmp >> 64) ^ tmp;
+    }
+    
     inline double next_double() {
-        // Convert to [0,1)
-        return (next() >> 11) * (1.0 / 9007199254740992.0); // 2^53
+        return (next() >> 11) * 0x1.0p-53;
     }
 };
 
@@ -35,10 +37,9 @@ void* toss(void* arg) {
     if (thread_id == num_threads - 1)
         tosses_per_thread += total_tosses % num_threads;
 
-    XorShift128Plus rng;
+    Wyrand rng;
     uint64_t seed = chrono::high_resolution_clock::now().time_since_epoch().count();
-    rng.s[0] = seed ^ (thread_id + 0x9e3779b97f4a7c15ULL);
-    rng.s[1] = seed ^ (thread_id * 0xbf58476d1ce4e5b9ULL);
+    rng.seed(seed ^ (thread_id + 0x9e3779b97f4a7c15ULL));
 
     long long local_count = 0;
     for (long long i = 0; i < tosses_per_thread; i++) {
@@ -48,9 +49,7 @@ void* toss(void* arg) {
             local_count++;
     }
 
-    pthread_mutex_lock(&mutex_lock);
     global_count += local_count;
-    pthread_mutex_unlock(&mutex_lock);
 
     return nullptr;
 }
