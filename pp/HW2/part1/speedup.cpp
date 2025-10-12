@@ -39,8 +39,8 @@ void *toss(void *arg) {
     __m256d dist = _mm256_add_pd(_mm256_mul_pd(x, x), _mm256_mul_pd(y, y));
     __m256 in_circle_mask = _mm256_cmp_pd(dist, ones, _CMP_LE_OS);
 
-    __m256 in_circle = _mm256_and_ps(ones, in_circle_mask); // a1, a2, a3, a4, a5, a6, a7, a8
-    __m256 in_circle_permute = _mm256_permute2f128_ps(in_circle, in_circle, 1); // a5, a6, a7, a8, a1, a2, a3, a4
+    __m256d in_circle = _mm256_and_ps(ones, in_circle_mask); // a1, a2, a3, a4, a5, a6, a7, a8
+    __m256 in_circle_permute = _mm256_permute2f128_pd(in_circle, in_circle, 1); // a5, a6, a7, a8, a1, a2, a3, a4
 
     in_circle = _mm256_hadd_ps(in_circle, in_circle_permute); // a1+a2, a3+a4, a5+a6, a7+a8, ....
     in_circle = _mm256_hadd_ps(in_circle, in_circle); // a1+a2+a3+a4, a5+a6+a7+a8, ....
