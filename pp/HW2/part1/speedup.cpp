@@ -29,14 +29,14 @@ void *toss(void *arg) {
         tosses_per_thread += total_tosses % num_threads;
     long long local_count = 0;
 
-    SEFUtility::RNG::Xoshiro256PlusSIMD8 rng(123 + thread_id);
-    alignas(32) float result[8];
-    int runs = tosses_per_thread / 8 + (tosses_per_thread % 8 == 0 ? 0 : 1);
+    SEFUtility::RNG::Xoshiro256Plus<SIMDInstructionSet::AVX2> rng(123 + thread_id);
+    alignas(32) float result[4];
+    int runs = tosses_per_thread / 4 + (tosses_per_thread % 4 == 0 ? 0 : 1);
 
     const __m256 ones = _mm256_set1_ps(1.0f);
   for (long long i = 0; i < runs; i++) { // perform 8 toss at a time
     __m256 x = rng.next8().result_packed_;
-    __m256 y = x;
+    __m256 y = rng.next8().result_packed_;
 
     __m256 dist = _mm256_add_ps(_mm256_mul_ps(x, x), _mm256_mul_ps(y, y));
     __m256 in_circle_mask = _mm256_cmp_ps(dist, ones, _CMP_LE_OS);

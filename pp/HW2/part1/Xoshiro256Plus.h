@@ -45,7 +45,7 @@ namespace SEFUtility::RNG
                 return reinterpret_cast<const float*>(&result_packed_)[index];
             }
 
-        public:
+        private:
             alignas(32) __m256 result_packed_;
 
             EightFloatValues(__m256 value) : result_packed_(value) {}
@@ -109,7 +109,7 @@ namespace SEFUtility::RNG
             __m256 range = _mm256_set1_ps(upper_bound - lower_bound);
             __m256 lower = _mm256_set1_ps(lower_bound);
             
-            return _mm256_fmadd_ps(values, range, lower);
+            return _mm256_fmadd_ps(values, range, lower);  // FMA: values * range + lower
         }
 
         static std::array<uint64_t, 4> jump(const std::array<uint64_t, 4>& initial_state)
@@ -169,7 +169,7 @@ namespace SEFUtility::RNG
     private:
         static constexpr uint32_t FLOAT_MASK = 0x3F800000u;
 
-        class alignas(64) SIMDState
+        class alignas(64) SIMDState  // 64-byte align for cache line
         {
         public:
             SIMDState() 
@@ -265,33 +265,17 @@ namespace SEFUtility::RNG
             s.s_[6] = rotl(s.s_[6], 45);  // s3_low = rotl(s3_low, 45)
             s.s_[7] = rotl(s.s_[7], 45);  // s3_high = rotl(s3_high, 45)
 
-            // Convert to float [0, 1) 
-            // result_low contains: [uint64_0, uint64_1, uint64_2, uint64_3]
-            // result_high contains: [uint64_4, uint64_5, uint64_6, uint64_7]
+            // Fast conversion to float using permute instructions
+            // Extract high 32 bits and convert to float directly
+            __m256i permute_mask = _mm256_set_epi32(7, 5, 3, 1, 6, 4, 2, 0);
+            __m256i packed_low = _mm256_permutevar8x32_epi32(result_low, permute_mask);
+            __m256i packed_high = _mm256_permutevar8x32_epi32(result_high, permute_mask);
             
-            // Extract upper 32 bits from each uint64
-            __m256i upper_low = _mm256_srli_epi64(result_low, 32);
-            __m256i upper_high = _mm256_srli_epi64(result_high, 32);
+            // Blend to interleave
+            __m256i packed = _mm256_blend_epi32(packed_low, _mm256_slli_si256(packed_high, 4), 0xAA);
             
-            // Now we have:
-            // upper_low:  [0, val0_upper32, 0, val1_upper32, 0, val2_upper32, 0, val3_upper32]
-            // upper_high: [0, val4_upper32, 0, val5_upper32, 0, val6_upper32, 0, val7_upper32]
-            // Need to pack these 8 uint32 values into one __m256i
-            
-            // Use permutevar8x32 to extract and reorder the values
-            // We want indices: 0, 2, 4, 6 from upper_low and 0, 2, 4, 6 from upper_high
-            const __m256i pack_indices = _mm256_set_epi32(14, 12, 10, 8, 6, 4, 2, 0);
-            
-            // Combine both into a single 512-bit conceptual space, but we need to do this in two steps
-            // First, pack upper_low's values into lower 128 bits
-            __m256i packed_low_permuted = _mm256_permutevar8x32_epi32(upper_low, _mm256_set_epi32(0, 0, 0, 0, 6, 4, 2, 0));
-            __m256i packed_high_permuted = _mm256_permutevar8x32_epi32(upper_high, _mm256_set_epi32(6, 4, 2, 0, 0, 0, 0, 0));
-            
-            // Blend them together
-            __m256i packed_uint32 = _mm256_blend_epi32(packed_low_permuted, packed_high_permuted, 0xF0);
-
             // Convert to float [0, 1)
-            __m256i mantissa = _mm256_srli_epi32(packed_uint32, 9);
+            __m256i mantissa = _mm256_srli_epi32(packed, 9);
             __m256i float_bits = _mm256_or_si256(mantissa, _mm256_set1_epi32(FLOAT_MASK));
             
             __m256 result = _mm256_castsi256_ps(float_bits);
