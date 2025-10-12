@@ -5,18 +5,26 @@
 #include <cmath>
 #include <chrono>
 #include <random>
+#include <atomic>
 
 using namespace std;
 
 long long total_tosses;
-long long* thread_counts;  // Array to store each thread's count
+
+
+atomic<long long> global_count(0);
 int num_threads;
 
 #include "SIMDInstructionSet.h"
+
 #include "Xoshiro256Plus.h"
 
 #define __AVX2_AVAILABLE__
+
+pthread_mutex_t mutex_lock;
+
 #define RADIUS (2<<14)
+
 
 void *toss(void *arg) {
     long long thread_id = (long long)arg;
@@ -30,30 +38,31 @@ void *toss(void *arg) {
     int runs = tosses_per_thread / 8 + (tosses_per_thread % 8 == 0 ? 0 : 1);
 
     const __m256 ones = _mm256_set1_ps(1.0f);
-    for (long long i = 0; i < runs; i++) {
-        __m256 x = rng.next8().result_packed_;
-        __m256 y = rng.next8().result_packed_;
+  for (long long i = 0; i < runs; i++) { // perform 8 toss at a time
+    __m256 x = rng.next8().result_packed_;
+    __m256 y = rng.next8().result_packed_;
 
-        __m256 dist = _mm256_add_ps(_mm256_mul_ps(x, x), _mm256_mul_ps(y, y));
-        __m256 in_circle_mask = _mm256_cmp_ps(dist, ones, _CMP_LE_OS);
+    __m256 dist = _mm256_add_ps(_mm256_mul_ps(x, x), _mm256_mul_ps(y, y));
+    __m256 in_circle_mask = _mm256_cmp_ps(dist, ones, _CMP_LE_OS);
 
-        __m256 in_circle = _mm256_and_ps(ones, in_circle_mask);
-        __m256 in_circle_permute = _mm256_permute2f128_ps(in_circle, in_circle, 1);
+    __m256 in_circle = _mm256_and_ps(ones, in_circle_mask); // a1, a2, a3, a4, a5, a6, a7, a8
+    __m256 in_circle_permute = _mm256_permute2f128_ps(in_circle, in_circle, 1); // a5, a6, a7, a8, a1, a2, a3, a4
 
-        in_circle = _mm256_hadd_ps(in_circle, in_circle_permute);
-        in_circle = _mm256_hadd_ps(in_circle, in_circle);
-        in_circle = _mm256_hadd_ps(in_circle, in_circle);
+    in_circle = _mm256_hadd_ps(in_circle, in_circle_permute); // a1+a2, a3+a4, a5+a6, a7+a8, ....
+    in_circle = _mm256_hadd_ps(in_circle, in_circle); // a1+a2+a3+a4, a5+a6+a7+a8, ....
+    in_circle = _mm256_hadd_ps(in_circle, in_circle); // a1+a2+a3+a4+a5+a6+a7+a8, ....
 
-        _mm256_store_ps(result, in_circle);
-        local_count += (short) result[0];
-    }
+    _mm256_store_ps(result, in_circle);
+    // explicit conversion is important
+    // long long 64-bit will be implicitly convert to float 32-bit if not specify
+    local_count += (short) result[0];
+  }
 
-    // No mutex needed - just store in thread-local array
-    thread_counts[thread_id] = local_count;
-    return nullptr;
+    global_count.fetch_add(local_count, memory_order_relaxed);
+  return nullptr;
 }
-
 int main(int argc, char* argv[]) {
+
     if (argc != 3) {
         cerr << "Usage: " << argv[0] << " <number_of_threads> <number_of_tosses>" << endl;
         return 1;
@@ -67,7 +76,7 @@ int main(int argc, char* argv[]) {
     }
 
     pthread_t* threads = new pthread_t[num_threads];
-    thread_counts = new long long[num_threads]();  // Initialize to zero
+    pthread_mutex_init(&mutex_lock, nullptr);
 
     auto start = chrono::high_resolution_clock::now();
 
@@ -80,13 +89,8 @@ int main(int argc, char* argv[]) {
     auto end = chrono::high_resolution_clock::now();
     double seconds = chrono::duration<double>(end - start).count();
 
-    // Sum up all thread counts in the main thread
-    long long global_count = 0;
-    for (int i = 0; i < num_threads; i++)
-        global_count += thread_counts[i];
-
+    pthread_mutex_destroy(&mutex_lock);
     delete[] threads;
-    delete[] thread_counts;
 
     double pi_estimate = 4.0 * (double)global_count / (double)total_tosses;
     cout.precision(12);
