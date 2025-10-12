@@ -36,7 +36,7 @@ void *toss(void *arg) {
     alignas(32)  __m256d x = rng.dnext4().result_packed_;
     alignas(32)  __m256d y = rng.dnext4().result_packed_;
 
-    __m256d dist = _mm256_add_pd(_mm256_mul_psd(x, x), _mm256_mul_psd(y, y));
+    __m256d dist = _mm256_add_pd(_mm256_mul_pd(x, x), _mm256_mul_pd(y, y));
     __m256 in_circle_mask = _mm256_cmp_pd(dist, ones, _CMP_LE_OS);
 
     __m256 in_circle = _mm256_and_ps(ones, in_circle_mask); // a1, a2, a3, a4, a5, a6, a7, a8
