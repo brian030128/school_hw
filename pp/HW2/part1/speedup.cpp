@@ -22,6 +22,8 @@ pthread_mutex_t mutex_lock;
 
 #define RADIUS (2<<14)
 
+long long global_count_array[6];
+
 void *toss(void *arg) {
     long long thread_id = (long long)arg;
     long long tosses_per_thread = total_tosses / num_threads;
@@ -55,7 +57,7 @@ void *toss(void *arg) {
   }
 
     //pthread_mutex_lock(&mutex_lock);
-    global_count += local_count;
+    global_count_array[thread_id] = local_count;
     //pthread_mutex_unlock(&mutex_lock);
   return nullptr;
 }
@@ -90,10 +92,12 @@ int main(int argc, char* argv[]) {
     pthread_mutex_destroy(&mutex_lock);
     delete[] threads;
 
+    for (int i = 0; i < num_threads; i++)
+        global_count += global_count_array[i];
+
     double pi_estimate = 4.0 * (double)global_count / (double)total_tosses;
     cout.precision(12);
-    cout << "Estimated Pi = " << pi_estimate << endl;
-    cout << "Execution Time: " << seconds << " sec" << endl;
+    cout << pi_estimate << endl;
 
     return 0;
 }
