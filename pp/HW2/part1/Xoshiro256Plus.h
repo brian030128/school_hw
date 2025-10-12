@@ -45,7 +45,7 @@ namespace SEFUtility::RNG
                 return reinterpret_cast<const float*>(&result_packed_)[index];
             }
 
-        private:
+        public:
             alignas(32) __m256 result_packed_;
 
             EightFloatValues(__m256 value) : result_packed_(value) {}
@@ -166,7 +166,7 @@ namespace SEFUtility::RNG
             return temp;
         }
 
-    private:
+    public:
         static constexpr uint32_t FLOAT_MASK = 0x3F800000u;
 
         class alignas(64) SIMDState  // 64-byte align for cache line
