@@ -61,12 +61,7 @@ void *toss(void *arg) {
   return nullptr;
 }
 int main(int argc, char* argv[]) {
-    SEFUtility::RNG::Xoshiro256PlusSIMD8 rng(123);
-    auto test = rng.next8();
-    cout << "Test random number: " << test[0] << ", " << test[1] << ", " << test[2] << ", " << test[3] << ", "
-         << test[4] << ", " << test[5] << ", " << test[6] << ", " << test[7] << endl;
-    return 0;
-    
+
     if (argc != 3) {
         cerr << "Usage: " << argv[0] << " <number_of_threads> <number_of_tosses>" << endl;
         return 1;
