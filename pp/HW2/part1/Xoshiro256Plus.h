@@ -37,6 +37,7 @@ See <http://creativecommons.org/publicdomain/zero/1.0/>. */
 #include <array>
 #include <limits>
 
+#include "SIMDInstructionSet.h"
 #include "SplitMix64.h"
 
 namespace SEFUtility::RNG
@@ -52,7 +53,7 @@ namespace SEFUtility::RNG
             EightIntegerValues& operator=(const EightIntegerValues&) = delete;
             EightIntegerValues& operator=(EightIntegerValues&&) = delete;
 
-#ifdef __AVX512F__
+#ifdef __AVX2_AVAILABLE__
             operator __m512i() const { return result_packed_; }
 #endif
 
@@ -64,7 +65,7 @@ namespace SEFUtility::RNG
             EightIntegerValues(uint64_t v1, uint64_t v2, uint64_t v3, uint64_t v4,
                               uint64_t v5, uint64_t v6, uint64_t v7, uint64_t v8)
             {
-                if (SIMD >= SIMDInstructionSet::AVX512)
+                if (SIMD >= SIMDInstructionSet::AVX2)
                 {
                     result_packed_ = _mm512_set_epi64(v8, v7, v6, v5, v4, v3, v2, v1);
                 }
@@ -101,7 +102,7 @@ namespace SEFUtility::RNG
             EightFloatValues& operator=(const EightFloatValues&) = delete;
             EightFloatValues& operator=(EightFloatValues&&) = delete;
 
-#ifdef __AVX512F__
+#ifdef __AVX2_AVAILABLE__
             operator __m512() const { return result_packed_; }
 #endif
 
@@ -110,7 +111,7 @@ namespace SEFUtility::RNG
            public:
             alignas(64) __m512 result_packed_;
 
-#ifdef __AVX512F__
+#ifdef __AVX2_AVAILABLE__
             EightFloatValues(__m512 value) : result_packed_(std::move(value)) {}
 #else
             EightFloatValues(__m512& value) : result_packed_(std::move(value)) {}
@@ -138,7 +139,7 @@ namespace SEFUtility::RNG
         {
             static_assert(SIMD != SIMDInstructionSet::AVX, "AVX RNG is not supported - just use NONE");
 
-#ifndef __AVX512F__
+#ifdef __AVX2_AVAILABLE__
             static_assert(SIMD == SIMDInstructionSet::NONE,
                           "Cannot have an AVX-512 RNG if AVX-512 extensions are not available");
 #endif
@@ -160,7 +161,7 @@ namespace SEFUtility::RNG
             serial_next8_state_[6] = long_jump(serial_next8_state_[5]);
             serial_next8_state_[7] = long_jump(serial_next8_state_[6]);
 
-            if constexpr (SIMD >= SIMDInstructionSet::AVX512)
+            if constexpr (SIMD >= SIMDInstructionSet::AVX2)
             {
                 simd_state_ = SIMDState(serial_next8_state_);
             }
@@ -170,7 +171,7 @@ namespace SEFUtility::RNG
         {
             static_assert(SIMD != SIMDInstructionSet::AVX, "AVX RNG is not supported - just use NONE");
 
-#ifndef __AVX512F__
+#ifdef __AVX2_AVAILABLE__
             static_assert(SIMD == SIMDInstructionSet::NONE,
                           "Cannot have an AVX-512 RNG if AVX-512 extensions are not available");
 #endif
@@ -184,7 +185,7 @@ namespace SEFUtility::RNG
             serial_next8_state_[6] = long_jump(serial_next8_state_[5]);
             serial_next8_state_[7] = long_jump(serial_next8_state_[6]);
 
-            if constexpr (SIMD >= SIMDInstructionSet::AVX512)
+            if constexpr (SIMD >= SIMDInstructionSet::AVX2)
             {
                 simd_state_ = SIMDState(serial_next8_state_);
             }
@@ -242,7 +243,7 @@ namespace SEFUtility::RNG
 
         EightIntegerValues next8()
         {
-            if constexpr (SIMD >= SIMDInstructionSet::AVX512)
+            if constexpr (SIMD >= SIMDInstructionSet::AVX2)
             {
                 return simd_next8_internal(simd_state_);
             }
@@ -264,7 +265,7 @@ namespace SEFUtility::RNG
 
             auto eight_ints = next8();
 
-            if constexpr (SIMD >= SIMDInstructionSet::AVX512)
+            if constexpr (SIMD >= SIMDInstructionSet::AVX2)
             {
                 return _mm512_add_epi64(
                     _mm512_srli_epi64(_mm512_mullo_epi32(eight_ints, _mm512_set1_epi64(range)), 32),
@@ -309,7 +310,7 @@ namespace SEFUtility::RNG
 
         EightFloatValues fnext8()
         {
-            if constexpr (SIMD >= SIMDInstructionSet::AVX512)
+            if constexpr (SIMD >= SIMDInstructionSet::AVX2)
             {
                 union
                 {
@@ -358,7 +359,7 @@ namespace SEFUtility::RNG
 
         EightFloatValues fnext8(float lower_bound, float upper_bound)
         {
-            if constexpr (SIMD >= SIMDInstructionSet::AVX512)
+            if constexpr (SIMD >= SIMDInstructionSet::AVX2)
             {
                 __m512 range = _mm512_set1_ps(upper_bound - lower_bound);
                 __m512 lower = _mm512_set1_ps(lower_bound);
@@ -470,7 +471,7 @@ namespace SEFUtility::RNG
         static constexpr __m512i ZERO_PACKED_INT64 = cnstexpr_mm512_set1_epi64(0);
         static constexpr __m512 ONE_PACKED_FLOAT = cnstexpr_mm512_set1_ps(1.0f);
 
-#ifdef __AVX512F__
+#ifdef __AVX2_AVAILABLE__
 
         class alignas(64) SIMDState
         {
