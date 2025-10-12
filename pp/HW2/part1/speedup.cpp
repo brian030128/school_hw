@@ -32,21 +32,21 @@ void* toss(void* arg) {
     // Process 4 tosses at a time
     long long i;
     for (i = 0; i + 3 < tosses_per_thread; i += 4) {
-        auto rng_values = rng.next4(0, RADIUS);
+        auto rng_values = rng.dnext4();
         
         // Process all 4 values
         for (int j = 0; j < 4; j++) {
-            int x = rng_values[j * 2];      // x values at even indices
-            int y = rng_values[j * 2 + 1];  // y values at odd indices
-            if (x * x + y * y <= RADIUS * RADIUS)
+            double x = rng_values[j * 2];      // x values at even indices
+            double y = rng_values[j * 2 + 1];  // y values at odd indices
+            if (x * x + y * y <= 1.0)
                 local_count++;
         }
     }
     
     // Handle remaining tosses (if tosses_per_thread not divisible by 4)
     for (; i < tosses_per_thread; i++) {
-        int x = rng.next(0, RADIUS);
-        int y = rng.next(0, RADIUS);
+        double x = rng.dnext();
+        double y = rng.dnext();
         if (x * x + y * y <= RADIUS * RADIUS)
             local_count++;
     }
