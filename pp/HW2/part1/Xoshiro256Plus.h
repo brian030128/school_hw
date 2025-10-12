@@ -45,7 +45,7 @@ namespace SEFUtility::RNG
                 return reinterpret_cast<const float*>(&result_packed_)[index];
             }
 
-        public:
+        private:
             alignas(32) __m256 result_packed_;
 
             EightFloatValues(__m256 value) : result_packed_(value) {}
@@ -109,7 +109,7 @@ namespace SEFUtility::RNG
             __m256 range = _mm256_set1_ps(upper_bound - lower_bound);
             __m256 lower = _mm256_set1_ps(lower_bound);
             
-            return _mm256_fmadd_ps(values, range, lower);  // FMA: values * range + lower
+            return _mm256_fmadd_ps(values, range, lower);
         }
 
         static std::array<uint64_t, 4> jump(const std::array<uint64_t, 4>& initial_state)
@@ -169,7 +169,7 @@ namespace SEFUtility::RNG
     private:
         static constexpr uint32_t FLOAT_MASK = 0x3F800000u;
 
-        class alignas(64) SIMDState  // 64-byte align for cache line
+        class alignas(64) SIMDState
         {
         public:
             SIMDState() 
@@ -265,17 +265,24 @@ namespace SEFUtility::RNG
             s.s_[6] = rotl(s.s_[6], 45);  // s3_low = rotl(s3_low, 45)
             s.s_[7] = rotl(s.s_[7], 45);  // s3_high = rotl(s3_high, 45)
 
-            // Fast conversion to float using permute instructions
-            // Extract high 32 bits and convert to float directly
-            __m256i permute_mask = _mm256_set_epi32(7, 5, 3, 1, 6, 4, 2, 0);
-            __m256i packed_low = _mm256_permutevar8x32_epi32(result_low, permute_mask);
-            __m256i packed_high = _mm256_permutevar8x32_epi32(result_high, permute_mask);
+            // Convert to float [0, 1) - proper packing
+            // Extract upper 32 bits from each 64-bit value
+            __m256i upper_low = _mm256_srli_epi64(result_low, 32);
+            __m256i upper_high = _mm256_srli_epi64(result_high, 32);
+
+            // Shuffle to pack the 32-bit values
+            // _MM_SHUFFLE(3,1,2,0) keeps lanes 0 and 2 (the actual values after shift)
+            __m256i shuffled_low = _mm256_shuffle_epi32(upper_low, _MM_SHUFFLE(3, 1, 2, 0));
+            __m256i shuffled_high = _mm256_shuffle_epi32(upper_high, _MM_SHUFFLE(3, 1, 2, 0));
+
+            // Extract the 128-bit lanes and combine into one 256-bit register
+            __m128i low_128 = _mm256_castsi256_si128(shuffled_low);
+            __m128i high_128 = _mm256_castsi256_si128(shuffled_high);
             
-            // Blend to interleave
-            __m256i packed = _mm256_blend_epi32(packed_low, _mm256_slli_si256(packed_high, 4), 0xAA);
-            
+            __m256i packed_uint32 = _mm256_set_m128i(high_128, low_128);
+
             // Convert to float [0, 1)
-            __m256i mantissa = _mm256_srli_epi32(packed, 9);
+            __m256i mantissa = _mm256_srli_epi32(packed_uint32, 9);
             __m256i float_bits = _mm256_or_si256(mantissa, _mm256_set1_epi32(FLOAT_MASK));
             
             __m256 result = _mm256_castsi256_ps(float_bits);
