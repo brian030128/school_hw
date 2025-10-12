@@ -20,43 +20,40 @@ pthread_mutex_t mutex_lock;
 
 #define RADIUS (2<<14)
 
-void* toss(void* arg) {
-    long long thread_id = (long long)arg;
-    long long tosses_per_thread = total_tosses / num_threads;
-    if (thread_id == num_threads - 1)
-        tosses_per_thread += total_tosses % num_threads;
+void *toss(void *number) {
+  long long toss_num = *((long long *) number);
+  long long in_circle_num = 0;
 
-    long long local_count = 0;
-    SEFUtility::RNG::Xoshiro256Plus<SIMDInstructionSet::AVX2> rng(123 + thread_id);
+   SEFUtility::RNG::Xoshiro256Plus<SIMDInstructionSet::AVX2> rng(123 + thread_id);
+  alignas(32) float result[8];
 
-    // Process 4 tosses at a time
-    long long i;
-    for (i = 0; i + 3 < tosses_per_thread; i += 4) {
-        auto rng_values = rng.dnext4();
-        
-        // Process all 4 values
-        for (int j = 0; j < 4; j++) {
-            double x = rng_values[j * 2];      // x values at even indices
-            double y = rng_values[j * 2 + 1];  // y values at odd indices
-            if (x * x + y * y <= 1.0)
-                local_count++;
-        }
-    }
-    
-    // Handle remaining tosses (if tosses_per_thread not divisible by 4)
-    for (; i < tosses_per_thread; i++) {
-        double x = rng.dnext();
-        double y = rng.dnext();
-        if (x * x + y * y <= RADIUS * RADIUS)
-            local_count++;
-    }
+  for (long long i = 0; i < toss_num; i++) { // perform 8 toss at a time
+    __m256 rand_float_x = _mm256_cvtepi32_ps(rng.next4().operator __m256i()); // convert random int to float
+    __m256 float_x = _mm256_div_ps(rand_float_x, rand_max); // scale to -1 to 1
 
-    // Thread-safe update
+    __m256 rand_float_y = _mm256_cvtepi32_ps(rng.next4().operator __m256i()); // convert random int to float
+    __m256 float_y = _mm256_div_ps(rand_float_y, rand_max); // scale to -1 to 1
+
+    __m256 distance = _mm256_add_ps(_mm256_mul_ps(float_x, float_x), _mm256_mul_ps(float_y, float_y)); // x * x + y * y
+    __m256 in_circle_mask = _mm256_cmp_ps(distance, one, _CMP_LE_OS); // distance <= 1
+
+    __m256 in_circle = _mm256_and_ps(one, in_circle_mask); // a1, a2, a3, a4, a5, a6, a7, a8
+    __m256 in_circle_permute = _mm256_permute2f128_ps(in_circle, in_circle, 1); // a5, a6, a7, a8, a1, a2, a3, a4
+
+    in_circle = _mm256_hadd_ps(in_circle, in_circle_permute); // a1+a2, a3+a4, a5+a6, a7+a8, ....
+    in_circle = _mm256_hadd_ps(in_circle, in_circle); // a1+a2+a3+a4, a5+a6+a7+a8, ....
+    in_circle = _mm256_hadd_ps(in_circle, in_circle); // a1+a2+a3+a4+a5+a6+a7+a8, ....
+
+    _mm256_store_ps(result, in_circle);
+    // explicit conversion is important
+    // long long 64-bit will be implicitly convert to float 32-bit if not specify
+    in_circle_num += (short) result[0];
+  }
+      // Thread-safe update
     pthread_mutex_lock(&mutex_lock);
-    global_count += local_count;
+    global_count += in_circle_num;
     pthread_mutex_unlock(&mutex_lock);
-
-    return nullptr;
+  return nullptr;
 }
 int main(int argc, char* argv[]) {
     if (argc != 3) {
