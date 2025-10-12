@@ -67,7 +67,7 @@ namespace SEFUtility::RNG
                 return reinterpret_cast<const float*>(&result_packed_)[index];
             }
 
-        public:
+        private:
             alignas(32) __m256 result_packed_;
 
             EightFloatValues(__m256 value) : result_packed_(value) {}
@@ -93,8 +93,8 @@ namespace SEFUtility::RNG
         {
             SplitMix64 split_mix(seed);
 
-            // Initialize 4 independent generator states (for SIMD parallelism)
-            std::array<std::array<uint64_t, 4>, 4> initial_states;
+            // Initialize 8 independent generator states
+            std::array<std::array<uint64_t, 4>, 8> initial_states;
             
             initial_states[0][0] = split_mix.next();
             initial_states[0][1] = split_mix.next();
@@ -102,7 +102,7 @@ namespace SEFUtility::RNG
             initial_states[0][3] = split_mix.next();
 
             // Use long jumps to create independent streams
-            for (size_t i = 1; i < 4; ++i)
+            for (size_t i = 1; i < 8; ++i)
             {
                 initial_states[i] = long_jump(initial_states[i - 1]);
             }
@@ -110,7 +110,7 @@ namespace SEFUtility::RNG
             simd_state_ = SIMDState(initial_states);
         }
 
-        Xoshiro256PlusSIMD8(const std::array<std::array<uint64_t, 4>, 4>& seeds)
+        Xoshiro256PlusSIMD8(const std::array<std::array<uint64_t, 4>, 8>& seeds)
         {
             simd_state_ = SIMDState(seeds);
         }
@@ -201,132 +201,125 @@ namespace SEFUtility::RNG
         public:
             SIMDState() 
             {
-                // Initialize to zero
                 for (int i = 0; i < 4; ++i)
                 {
-                    packed_state_[i] = _mm256_setzero_si256();
+                    packed_state_low_[i] = _mm256_setzero_si256();
+                    packed_state_high_[i] = _mm256_setzero_si256();
                 }
             }
 
             SIMDState(const SIMDState& state_to_copy, JumpOnCopy jump_dist = JumpOnCopy::None)
             {
-                // Copy the state
                 for (int i = 0; i < 4; ++i)
                 {
-                    packed_state_[i] = state_to_copy.packed_state_[i];
+                    packed_state_low_[i] = state_to_copy.packed_state_low_[i];
+                    packed_state_high_[i] = state_to_copy.packed_state_high_[i];
                 }
 
                 if (jump_dist != JumpOnCopy::None)
                 {
-                    // Extract individual states, jump them, and repack
-                    std::array<std::array<uint64_t, 4>, 4> states;
+                    std::array<std::array<uint64_t, 4>, 8> states;
                     
+                    // Extract all 8 states
                     for (int lane = 0; lane < 4; ++lane)
                     {
                         for (int component = 0; component < 4; ++component)
                         {
-                            states[lane][component] = reinterpret_cast<const uint64_t*>(&packed_state_[component])[lane];
+                            states[lane][component] = reinterpret_cast<const uint64_t*>(&packed_state_low_[component])[lane];
+                            states[lane + 4][component] = reinterpret_cast<const uint64_t*>(&packed_state_high_[component])[lane];
                         }
-                        
-                        if (jump_dist == JumpOnCopy::Short)
-                        {
-                            states[lane] = jump(states[lane]);
-                        }
-                        else
-                        {
-                            states[lane] = long_jump(states[lane]);
-                        }
+                    }
+                    
+                    // Jump each state
+                    for (int i = 0; i < 8; ++i)
+                    {
+                        states[i] = (jump_dist == JumpOnCopy::Short) ? jump(states[i]) : long_jump(states[i]);
                     }
                     
                     // Repack
                     for (int component = 0; component < 4; ++component)
                     {
-                        packed_state_[component] = _mm256_set_epi64x(
-                            states[3][component],
-                            states[2][component],
-                            states[1][component],
-                            states[0][component]
+                        packed_state_low_[component] = _mm256_set_epi64x(
+                            states[3][component], states[2][component],
+                            states[1][component], states[0][component]
+                        );
+                        packed_state_high_[component] = _mm256_set_epi64x(
+                            states[7][component], states[6][component],
+                            states[5][component], states[4][component]
                         );
                     }
                 }
             }
 
-            SIMDState(const std::array<std::array<uint64_t, 4>, 4>& seeds)
+            SIMDState(const std::array<std::array<uint64_t, 4>, 8>& seeds)
             {
-                // Pack 4 generators into SIMD state
-                // Each generator has 4 uint64_t components
-                // We want to arrange them so each __m256i holds one component from all 4 generators
-                
+                // Pack 8 generators: first 4 in low, next 4 in high
                 for (int component = 0; component < 4; ++component)
                 {
-                    packed_state_[component] = _mm256_set_epi64x(
-                        seeds[3][component],  // Lane 3
-                        seeds[2][component],  // Lane 2
-                        seeds[1][component],  // Lane 1
-                        seeds[0][component]   // Lane 0
+                    packed_state_low_[component] = _mm256_set_epi64x(
+                        seeds[3][component], seeds[2][component],
+                        seeds[1][component], seeds[0][component]
+                    );
+                    packed_state_high_[component] = _mm256_set_epi64x(
+                        seeds[7][component], seeds[6][component],
+                        seeds[5][component], seeds[4][component]
                     );
                 }
             }
 
-            const __m256i operator[](size_t index) const 
-            { 
-                assert(index < 4);
-                return packed_state_[index]; 
-            }
+            const __m256i low(size_t index) const { assert(index < 4); return packed_state_low_[index]; }
+            const __m256i high(size_t index) const { assert(index < 4); return packed_state_high_[index]; }
+            
+            __m256i& low(size_t index) { assert(index < 4); return packed_state_low_[index]; }
+            __m256i& high(size_t index) { assert(index < 4); return packed_state_high_[index]; }
 
-            __m256i& operator[](size_t index) 
-            { 
-                assert(index < 4);
-                return packed_state_[index]; 
-            }
-
-        public:
-            // 4 SIMD registers, each holding one component from 4 parallel generators
-            alignas(32) __m256i packed_state_[4];
+        private:
+            // 8 parallel generators split into two groups of 4
+            alignas(32) __m256i packed_state_low_[4];   // Generators 0-3
+            alignas(32) __m256i packed_state_high_[4];  // Generators 4-7
         };
 
         SIMDState simd_state_;
 
-        // Generate 4 uint64 values (in one __m256i) - this advances the state once
-        static __m256i simd_next4_uint64_internal(SIMDState& state)
-        {
-            __m256i result = _mm256_add_epi64(state[0], state[3]);
-            const __m256i temp = _mm256_slli_epi64(state[1], 17);
-
-            state[2] = _mm256_xor_si256(state[2], state[0]);
-            state[3] = _mm256_xor_si256(state[3], state[1]);
-            state[1] = _mm256_xor_si256(state[1], state[2]);
-            state[0] = _mm256_xor_si256(state[0], state[3]);
-            state[2] = _mm256_xor_si256(state[2], temp);
-            state[3] = rotl(state[3], 45);
-
-            return result;
-        }
-
         // Generate 8 float values in [0, 1) packed in one __m256
         static EightFloatValues simd_next8_internal(SIMDState& state)
         {
-            // Get 8 uint64 values by calling the generator twice
-            __m256i values_low = simd_next4_uint64_internal(state);
-            __m256i values_high = simd_next4_uint64_internal(state);
+            // Process low group (4 generators)
+            __m256i result_low = _mm256_add_epi64(state.low(0), state.low(3));
+            const __m256i temp_low = _mm256_slli_epi64(state.low(1), 17);
 
-            // Use upper 32 bits from each uint64 for better quality
-            __m256i upper_low = _mm256_srli_epi64(values_low, 32);
-            __m256i upper_high = _mm256_srli_epi64(values_high, 32);
+            state.low(2) = _mm256_xor_si256(state.low(2), state.low(0));
+            state.low(3) = _mm256_xor_si256(state.low(3), state.low(1));
+            state.low(1) = _mm256_xor_si256(state.low(1), state.low(2));
+            state.low(0) = _mm256_xor_si256(state.low(0), state.low(3));
+            state.low(2) = _mm256_xor_si256(state.low(2), temp_low);
+            state.low(3) = rotl(state.low(3), 45);
 
-            // Pack into 8 uint32 values
-            // After shuffle, we get [a0, a1, a2, a3] in each 128-bit lane
+            // Process high group (4 generators)
+            __m256i result_high = _mm256_add_epi64(state.high(0), state.high(3));
+            const __m256i temp_high = _mm256_slli_epi64(state.high(1), 17);
+
+            state.high(2) = _mm256_xor_si256(state.high(2), state.high(0));
+            state.high(3) = _mm256_xor_si256(state.high(3), state.high(1));
+            state.high(1) = _mm256_xor_si256(state.high(1), state.high(2));
+            state.high(0) = _mm256_xor_si256(state.high(0), state.high(3));
+            state.high(2) = _mm256_xor_si256(state.high(2), temp_high);
+            state.high(3) = rotl(state.high(3), 45);
+
+            // Convert 8 uint64 to 8 uint32 (using upper 32 bits)
+            __m256i upper_low = _mm256_srli_epi64(result_low, 32);
+            __m256i upper_high = _mm256_srli_epi64(result_high, 32);
+
+            // Pack: shuffle to get uint32s together, then combine
             __m256i shuffled_low = _mm256_shuffle_epi32(upper_low, _MM_SHUFFLE(2, 0, 2, 0));
             __m256i shuffled_high = _mm256_shuffle_epi32(upper_high, _MM_SHUFFLE(2, 0, 2, 0));
 
-            // Extract and combine the lower 128 bits from each
             __m128i low_128 = _mm256_castsi256_si128(shuffled_low);
             __m128i high_128 = _mm256_castsi256_si128(shuffled_high);
             
             __m256i packed_uint32 = _mm256_set_m128i(high_128, low_128);
 
-            // Convert to float [0, 1):
-            // Take upper 23 bits for mantissa, OR with 1.0f pattern, subtract 1.0
+            // Convert to float [0, 1)
             __m256i mantissa = _mm256_srli_epi32(packed_uint32, 9);
             __m256i float_bits = _mm256_or_si256(mantissa, _mm256_set1_epi32(FLOAT_MASK));
             
