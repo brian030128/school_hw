@@ -55,7 +55,7 @@ void *toss(void *arg) {
   }
 
     //pthread_mutex_lock(&mutex_lock);
-    //global_count += local_count;
+    global_count += local_count;
     //pthread_mutex_unlock(&mutex_lock);
   return nullptr;
 }
