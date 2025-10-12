@@ -12,12 +12,13 @@ long long total_tosses;
 long long global_count = 0;
 int num_threads;
 
+#include "SIMDInstructionSet.h"
+
+#include "Xoshiro256Plus.h"
+
 pthread_mutex_t mutex_lock;
 
-thread_local std::mt19937 gen(std::random_device{}());
-thread_local std::uniform_int_distribution<int> dist(1, 1000);
-
-#define RADIUS_SQUARE 1000000 
+#define RADIUS (2<<15)
 
 void* toss(void* arg) {
     long long thread_id = (long long)arg;
@@ -26,10 +27,17 @@ void* toss(void* arg) {
         tosses_per_thread += total_tosses % num_threads;
 
     long long local_count = 0;
+    SEFUtility::RNG::Xoshiro256Plus<SIMDInstructionSet::AVX2> rng(123 + thread_id);
+    SEFUtility::RNG::Xoshiro256Plus<SIMDInstructionSet::AVX2>::FourIntegerValues rng_values;
+
+
     for (long long i = 0; i < tosses_per_thread; i++) {
-        int x = dist(gen);
-        int y = dist(gen);
-        if (x * x + y * y <= RADIUS_SQUARE)
+        int n = i % 2;
+        if(n == 0)
+            rng_values = rng.next4(0, RADIUS);
+        int x = rng_values.result_packed_[n * 2];
+        int y = rng_values.result_packed_[n * 2 + 1];
+        if (x * x + y * y <= RADIUS * RADIUS)  
             local_count++;
     }
 
