@@ -20,24 +20,26 @@ pthread_mutex_t mutex_lock;
 
 #define RADIUS (2<<14)
 
-void *toss(void *number) {
-  long long toss_num = *((long long *) number);
-  long long in_circle_num = 0;
+void *toss(void *arg) {
+    long long thread_id = (long long)arg;
+    long long tosses_per_thread = total_tosses / num_threads;
+    if (thread_id == num_threads - 1)
+        tosses_per_thread += total_tosses % num_threads;
+    long long local_count = 0;
 
-   SEFUtility::RNG::Xoshiro256Plus<SIMDInstructionSet::AVX2> rng(123 + thread_id);
-  alignas(32) float result[8];
+    SEFUtility::RNG::Xoshiro256Plus<SIMDInstructionSet::AVX2> rng(123 + thread_id);
+    alignas(32) float result[8];
+    int runs = tosses_per_thread / 8 + (tosses_per_thread % 8 == 0 ? 0 : 1);
 
-  for (long long i = 0; i < toss_num; i++) { // perform 8 toss at a time
-    __m256 rand_float_x = _mm256_cvtepi32_ps(rng.next4().operator __m256i()); // convert random int to float
-    __m256 float_x = _mm256_div_ps(rand_float_x, rand_max); // scale to -1 to 1
+    const __m256 ones = _mm256_set1_ps(1.0f);
+  for (long long i = 0; i < runs; i++) { // perform 8 toss at a time
+    alignas(32)  __m256 x = rng.dnext4().operator __m256i();
+    alignas(32)  __m256 y = rng.dnext4().operator __m256i();
 
-    __m256 rand_float_y = _mm256_cvtepi32_ps(rng.next4().operator __m256i()); // convert random int to float
-    __m256 float_y = _mm256_div_ps(rand_float_y, rand_max); // scale to -1 to 1
+    __m256 dist = _mm256_add_ps(_mm256_mul_ps(x, x), _mm256_mul_ps(y, y));
+    __m256 in_circle_mask = _mm256_cmp_ps(dist, ones, _CMP_LE_OS);
 
-    __m256 distance = _mm256_add_ps(_mm256_mul_ps(float_x, float_x), _mm256_mul_ps(float_y, float_y)); // x * x + y * y
-    __m256 in_circle_mask = _mm256_cmp_ps(distance, one, _CMP_LE_OS); // distance <= 1
-
-    __m256 in_circle = _mm256_and_ps(one, in_circle_mask); // a1, a2, a3, a4, a5, a6, a7, a8
+    __m256 in_circle = _mm256_and_ps(ones, in_circle_mask); // a1, a2, a3, a4, a5, a6, a7, a8
     __m256 in_circle_permute = _mm256_permute2f128_ps(in_circle, in_circle, 1); // a5, a6, a7, a8, a1, a2, a3, a4
 
     in_circle = _mm256_hadd_ps(in_circle, in_circle_permute); // a1+a2, a3+a4, a5+a6, a7+a8, ....
@@ -47,11 +49,11 @@ void *toss(void *number) {
     _mm256_store_ps(result, in_circle);
     // explicit conversion is important
     // long long 64-bit will be implicitly convert to float 32-bit if not specify
-    in_circle_num += (short) result[0];
+    local_count += (short) result[0];
   }
-      // Thread-safe update
+
     pthread_mutex_lock(&mutex_lock);
-    global_count += in_circle_num;
+    global_count += local_count;
     pthread_mutex_unlock(&mutex_lock);
   return nullptr;
 }
