@@ -280,7 +280,7 @@ namespace SEFUtility::RNG
                 return packed_state_[index]; 
             }
 
-        private:
+        public:
             // 4 SIMD registers, each holding one component from 4 parallel generators
             alignas(32) __m256i packed_state_[4];
         };
