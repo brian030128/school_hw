@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <thread>
 #include <atomic>
+#include "cycle_timer.h"
 
 struct WorkerArgs
 {
@@ -68,6 +69,7 @@ extern void mandelbrot_serial(float x0,
 
 void worker_thread_start(WorkerArgs *const args)
 {
+    double start_time = CycleTimer::current_seconds();
     // Calculate how many rows this thread should process
     int rows_per_thread = args->height / args->numThreads;
     int start_row = args->threadId * rows_per_thread;
@@ -90,6 +92,9 @@ void worker_thread_start(WorkerArgs *const args)
                      total_rows,
                      args->maxIterations,
                      args->output);
+
+    double end_time = CycleTimer::current_seconds();
+    printf("[mandelbrot thread %d]:\t\t[%.3f] ms\n", args->threadId, end_time - start_time);
 }
 
 //
