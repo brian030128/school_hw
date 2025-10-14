@@ -33,37 +33,63 @@ extern void mandelbrot_serial(float x0,
 // worker_thread_start --
 //
 // Thread entrypoint.
+// void worker_thread_start(WorkerArgs *const args)
+// {
+//     const int chunk_size = 4;
+
+//     while (true)
+//     {
+//         // Atomically get the next chunk of rows to process
+//         int start_row = next_row.fetch_add(chunk_size);
+        
+//         if (start_row >= args->height)
+//             break;
+        
+//         // Calculate how many rows to actually process
+//         int total_rows = chunk_size;
+//         if (start_row + chunk_size > args->height)
+//         {
+//             total_rows = args->height - start_row;
+//         }
+        
+//         // Compute the mandelbrot set for this chunk
+//         mandelbrot_serial(args->x0,
+//                          args->y0,
+//                          args->x1,
+//                          args->y1,
+//                          args->width,
+//                          args->height,
+//                          start_row,
+//                          total_rows,
+//                          args->maxIterations,
+//                          args->output);
+//     }
+// }
+
 void worker_thread_start(WorkerArgs *const args)
 {
-    const int chunk_size = 4;
-
-    while (true)
+    // Calculate how many rows this thread should process
+    int rows_per_thread = args->height / args->numThreads;
+    int start_row = args->threadId * rows_per_thread;
+    int total_rows = rows_per_thread;
+    
+    // The last thread handles any remaining rows due to integer division
+    if (args->threadId == args->numThreads - 1)
     {
-        // Atomically get the next chunk of rows to process
-        int start_row = next_row.fetch_add(chunk_size);
-        
-        if (start_row >= args->height)
-            break;
-        
-        // Calculate how many rows to actually process
-        int total_rows = chunk_size;
-        if (start_row + chunk_size > args->height)
-        {
-            total_rows = args->height - start_row;
-        }
-        
-        // Compute the mandelbrot set for this chunk
-        mandelbrot_serial(args->x0,
-                         args->y0,
-                         args->x1,
-                         args->y1,
-                         args->width,
-                         args->height,
-                         start_row,
-                         total_rows,
-                         args->maxIterations,
-                         args->output);
+        total_rows = args->height - start_row;
     }
+    
+    // Compute the mandelbrot set for this thread's assigned rows
+    mandelbrot_serial(args->x0,
+                     args->y0,
+                     args->x1,
+                     args->y1,
+                     args->width,
+                     args->height,
+                     start_row,
+                     total_rows,
+                     args->maxIterations,
+                     args->output);
 }
 
 //
