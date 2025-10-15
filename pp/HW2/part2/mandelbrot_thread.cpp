@@ -35,7 +35,7 @@ extern void mandelbrot_serial(float x0,
 // Thread entrypoint.
 void worker_thread_start(WorkerArgs *const args)
 {
-    const int chunk_size = 4;
+    const int chunk_size = 1;
 
     while (true)
     {
