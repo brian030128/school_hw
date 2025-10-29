@@ -2,6 +2,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <omp.h> 
 
 #include "cg_impl.h"
 #include "randdp.h"
