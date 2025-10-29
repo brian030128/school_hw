@@ -2,7 +2,6 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <omp.h> 
 
 #include "cg_impl.h"
 #include "randdp.h"
@@ -11,113 +10,149 @@
 // Floaging point arrays here are named as in spec discussion of
 // CG algorithm
 //---------------------------------------------------------------------
-void conj_grad(const int colidx[],
-               const int rowstr[],
-               const double x[],
-               double z[],
-               const double a[],
-               double p[],
-               double q[],
-               double r[],
+void conj_grad(const int colidx[], const int rowstr[], const double x[], double z[],
+               const double a[], double p[], double q[], double r[],
                double *rnorm)
 {
-    const int nrows = lastrow - firstrow + 1;  // == NA
-    const int ncols = lastcol - firstcol + 1;  // == NA
-    const int cgitmax = 25;
+    int cgit, cgitmax = 25;
+    double d, sum, rho, rho0, alpha, beta;
 
-    double rho = 0.0, rho0 = 0.0, alpha = 0.0, beta = 0.0, d = 0.0;
-
-    // One parallel region for the whole CG to reduce overhead
-    #pragma omp parallel
+    //---------------------------------------------------------------------
+    // Initialize the CG algorithm:
+    //---------------------------------------------------------------------
+    // This loop has independent iterations, making it a good candidate
+    // for a parallel for directive.
+    #pragma omp parallel for
+    for (int j = 0; j < naa + 1; j++)
     {
-        // Initialize: q = 0, z = 0, r = x, p = r
-        #pragma omp for
-        for (int j = 0; j < ncols + 1; j++) {
-            q[j] = 0.0;
-            z[j] = 0.0;
-            r[j] = x[j];
-            p[j] = r[j];
-        }
+        q[j] = 0.0;
+        z[j] = 0.0;
+        r[j] = x[j];
+        p[j] = r[j];
+    }
 
-        // rho = r·r
-        #pragma omp for reduction(+:rho)
-        for (int j = 0; j < ncols; j++) {
-            rho += r[j] * r[j];
-        }
+    rho = 0.0;
+    //---------------------------------------------------------------------
+    // rho = r.r
+    // This is a reduction operation to compute the dot product of r with itself.
+    // The reduction(+:rho) clause tells OpenMP to create a private copy of rho
+    // for each thread, sum them up at the end, and store in the global rho.
+    //---------------------------------------------------------------------
+    #pragma omp parallel for reduction(+:rho)
+    for (int j = 0; j < lastcol - firstcol + 1; j++)
+    {
+        rho = rho + r[j] * r[j];
+    }
 
-        for (int cgit = 1; cgit <= cgitmax; cgit++) {
-            // q = A * p    (CSR matvec, row-parallel)
-            #pragma omp for
-            for (int j = 0; j < nrows; j++) {
-                double sum = 0.0;
-                for (int k = rowstr[j]; k < rowstr[j + 1]; k++) {
-                    sum += a[k] * p[colidx[k]];
-                }
-                q[j] = sum;
-            }
-
-            // d = p·q
-            d = 0.0;
-            #pragma omp for reduction(+:d)
-            for (int j = 0; j < ncols; j++) {
-                d += p[j] * q[j];
-            }
-
-            // alpha = rho / d  (single writer)
-            #pragma omp single
-            {
-                alpha = rho / d;
-                rho0 = rho;
-                rho  = 0.0;  // will be recomputed
-            }
-
-            // z += alpha*p;  r -= alpha*q;  accumulate new rho = r·r
-            #pragma omp for reduction(+:rho)
-            for (int j = 0; j < ncols; j++) {
-                z[j] += alpha * p[j];
-                r[j] -= alpha * q[j];
-                rho  += r[j] * r[j];
-            }
-
-            // beta = rho / rho0
-            #pragma omp single
-            {
-                beta = rho / rho0;
-            }
-
-            // p = r + beta * p
-            #pragma omp for
-            for (int j = 0; j < ncols; j++) {
-                p[j] = r[j] + beta * p[j];
-            }
-        } // CG inner iterations
-
-        // Compute residual norm explicitly:  ||r|| = ||x - A z||
-        // First, r = A z
-        #pragma omp for
-        for (int j = 0; j < nrows; j++) {
-            double sum = 0.0;
-            for (int k = rowstr[j]; k < rowstr[j + 1]; k++) {
-                sum += a[k] * z[colidx[k]];
-            }
-            r[j] = sum;
-        }
-
-        // rnorm = ||x - r||_2
-        double sumsq = 0.0;
-        #pragma omp for reduction(+:sumsq)
-        for (int j = 0; j < ncols; j++) {
-            double diff = x[j] - r[j];
-            sumsq += diff * diff;
-        }
-
-        #pragma omp single
+    //---------------------------------------------------------------------
+    //---->
+    // The conj grad iteration loop
+    //---->
+    // This outer loop has dependencies between iterations (e.g., rho from
+    // one iteration is used as rho0 in the next), so it remains serial.
+    // However, the loops *inside* it are parallelized.
+    //---------------------------------------------------------------------
+    for (cgit = 1; cgit <= cgitmax; cgit++)
+    {
+        //---------------------------------------------------------------------
+        // q = A.p
+        // This is the sparse matrix-vector multiply, the most expensive part.
+        // The outer loop's iterations are independent. The 'sum' variable is
+        // local to each iteration, so it is declared private.
+        //---------------------------------------------------------------------
+        #pragma omp parallel for private(sum)
+        for (int j = 0; j < lastrow - firstrow + 1; j++)
         {
-            *rnorm = sqrt(sumsq);
+            sum = 0.0;
+            for (int k = rowstr[j]; k < rowstr[j + 1]; k++)
+            {
+                sum = sum + a[k] * p[colidx[k]];
+            }
+            q[j] = sum;
         }
-    } // end parallel region
-}
 
+        //---------------------------------------------------------------------
+        // Obtain p.q
+        //---------------------------------------------------------------------
+        d = 0.0;
+        #pragma omp parallel for reduction(+:d)
+        for (int j = 0; j < lastcol - firstcol + 1; j++)
+        {
+            d = d + p[j] * q[j];
+        }
+
+        //---------------------------------------------------------------------
+        // Obtain alpha = rho / (p.q)
+        //---------------------------------------------------------------------
+        alpha = rho / d;
+
+        //---------------------------------------------------------------------
+        // Save a temporary of rho
+        //---------------------------------------------------------------------
+        rho0 = rho;
+
+        rho = 0.0;
+        //---------------------------------------------------------------------
+        // Merge the update of z and r with the calculation of the new rho.
+        // This is more efficient as it avoids a second loop and improves
+        // data locality.
+        // z = z + alpha*p
+        // r = r - alpha*q
+        // rho = r.r
+        //---------------------------------------------------------------------
+        #pragma omp parallel for reduction(+:rho)
+        for (int j = 0; j < lastcol - firstcol + 1; j++)
+        {
+            z[j] = z[j] + alpha * p[j];
+            r[j] = r[j] - alpha * q[j];
+            rho = rho + r[j] * r[j];
+        }
+
+        //---------------------------------------------------------------------
+        // Obtain beta:
+        //---------------------------------------------------------------------
+        beta = rho / rho0;
+
+        //---------------------------------------------------------------------
+        // p = r + beta*p
+        //---------------------------------------------------------------------
+        #pragma omp parallel for
+        for (int j = 0; j < lastcol - firstcol + 1; j++)
+        {
+            p[j] = r[j] + beta * p[j];
+        }
+    } // end of do cgit=1,cgitmax
+
+    //---------------------------------------------------------------------
+    // Compute residual norm explicitly: ||r|| = ||x - A.z||
+    // First, form A.z
+    // The partition submatrix-vector multiply
+    //---------------------------------------------------------------------
+    sum = 0.0;
+    #pragma omp parallel for private(d)
+    for (int j = 0; j < lastrow - firstrow + 1; j++)
+    {
+        d = 0.0;
+        for (int k = rowstr[j]; k < rowstr[j + 1]; k++)
+        {
+            d = d + a[k] * z[colidx[k]];
+        }
+        r[j] = d;
+    }
+
+    //---------------------------------------------------------------------
+    // At this point, r contains A.z
+    // Now compute the norm of (x - r)
+    //---------------------------------------------------------------------
+    #pragma omp parallel for reduction(+:sum) private(d)
+    for (int j = 0; j < lastcol - firstcol + 1; j++)
+    {
+        d = x[j] - r[j];
+        sum = sum + d * d;
+    }
+
+    *rnorm = sqrt(sum);
+}
 
 //---------------------------------------------------------------------
 // generate the test problem for benchmark 6
