@@ -196,8 +196,67 @@ void bfs_bottom_up(Graph graph, solution *sol)
 
 void bfs_hybrid(Graph graph, solution *sol)
 {
-    // For PP students:
-    //
-    // You will need to implement the "hybrid" BFS here as
-    // described in the handout.
+    // Initialize data structures
+    VertexSet list1;
+    VertexSet list2;
+    vertex_set_init(&list1, graph->num_nodes);
+    vertex_set_init(&list2, graph->num_nodes);
+
+    VertexSet *frontier = &list1;
+    VertexSet *new_frontier = &list2;
+
+    #pragma omp parallel for
+    for (int i = 0; i < graph->num_nodes; i++)
+    {
+        sol->distances[i] = NOT_VISITED_MARKER;
+    }
+
+    // Setup the root node
+    sol->distances[ROOT_NODE_ID] = 0;
+    frontier->vertices[frontier->count++] = ROOT_NODE_ID;
+
+    int current_distance = 0;
+
+    // A common heuristic is to switch when the frontier is a certain
+    // fraction of the total nodes, or when the number of edges to check
+    // in top-down exceeds the total number of edges in the graph.
+    // We use a simple size-based heuristic here.
+    // This value is a tunable parameter.
+    const int top_down_threshold = graph->num_nodes / 20;
+
+    // --- PHASE 1: Top-Down Search (while frontier is small) ---
+    while (frontier->count > 0)
+    {
+        // If the frontier becomes too large, break out and switch to bottom-up.
+        if (frontier->count > top_down_threshold)
+        {
+            break;
+        }
+
+        vertex_set_clear(new_frontier);
+        top_down_step(graph, frontier, new_frontier, sol->distances);
+
+        // Swap frontier pointers for the next iteration
+        VertexSet *tmp = frontier;
+        frontier = new_frontier;
+        new_frontier = tmp;
+
+        current_distance++;
+    }
+
+    // --- PHASE 2: Bottom-Up Search (after frontier is large) ---
+    // This phase only executes if the 'break' in the top-down loop was triggered.
+    // We use the last known frontier size to continue the loop condition.
+    int nodes_in_frontier = frontier->count;
+    while (nodes_in_frontier > 0)
+    {
+        // The bottom_up_step finds all nodes at distance `current_distance + 1`
+        // by checking for parents at `current_distance`.
+        nodes_in_frontier = bottom_up_step(graph, current_distance, sol->distances);
+        current_distance++;
+    }
+
+    // Cleanup
+    vertex_set_destroy(&list1);
+    vertex_set_destroy(&list2);
 }
