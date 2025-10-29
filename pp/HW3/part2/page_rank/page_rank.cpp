@@ -13,17 +13,6 @@
 // damping:     page-rank algorithm's damping parameter
 // convergence: page-rank algorithm's convergence threshold
 //
-#include <cmath>
-#include <omp.h>
-#include "graph.h" // Assumes graph.h is in the include path
-
-// page_rank --
-//
-// g:           graph to process (see common/graph.h)
-// solution:    array of per-vertex vertex scores (length of array is num_nodes(g))
-// damping:     page-rank algorithm's damping parameter
-// convergence: page-rank algorithm's convergence threshold
-//
 void page_rank(Graph g, double *solution, double damping, double convergence)
 {
     int nnodes = num_nodes(g);
