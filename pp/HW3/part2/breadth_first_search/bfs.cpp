@@ -115,19 +115,83 @@ void bfs_top_down(Graph graph, solution *sol)
     vertex_set_destroy(&list2);
 }
 
+/**
+ * @brief Performs one step of a bottom-up BFS.
+ *
+ * This function iterates over all nodes in the graph in parallel. For each
+ * unvisited node, it checks its incoming edges to see if any of its
+ * "parent" nodes were part of the frontier in the previous step (i.e., have
+ * a distance equal to 'current_distance'). If a parent on the frontier is
+ * found, the current node's distance is updated.
+ *
+ * @param graph The graph structure, including incoming edge data.
+ * @param current_distance The distance of the current frontier from the root.
+ * @param distances The array storing the shortest distance to each node.
+ * @return The number of nodes added to the new frontier in this step.
+ */
+static int bottom_up_step(Graph graph, int current_distance, int *distances)
+{
+    int frontier_size = 0;
+
+    // The core of the bottom-up approach. Iterate over all vertices.
+    // Each thread gets a chunk of vertices to check. The workload is
+    // the set of all nodes in the graph.
+    #pragma omp parallel for reduction(+:frontier_size)
+    for (int i = 0; i < graph->num_nodes; i++)
+    {
+        // If a node has not been visited yet...
+        if (distances[i] == NOT_VISITED_MARKER)
+        {
+            // ...check its parents by iterating over its incoming edges.
+            const Vertex *start_edge = incoming_begin(graph, i);
+            const Vertex *end_edge = incoming_end(graph, i);
+
+            for (const Vertex *v = start_edge; v < end_edge; v++)
+            {
+                int incoming_node = *v;
+
+                // If a parent node was in the previous frontier...
+                if (distances[incoming_node] == current_distance)
+                {
+                    // ...then this node is now visited and is part of the new frontier.
+                    distances[i] = current_distance + 1;
+                    frontier_size++;
+
+                    // We found a parent on the frontier, so we can stop
+                    // checking other parents and move to the next node.
+                    break;
+                }
+            }
+        }
+    }
+    return frontier_size;
+}
+
+
 void bfs_bottom_up(Graph graph, solution *sol)
 {
-    // For PP students:
-    //
-    // You will need to implement the "bottom up" BFS here as
-    // described in the handout.
-    //
-    // As a result of your code's execution, sol.distances should be
-    // correctly populated for all nodes in the graph.
-    //
-    // As was done in the top-down case, you may wish to organize your
-    // code by creating subroutine bottom_up_step() that is called in
-    // each step of the BFS process.
+    // Initialize all node distances to NOT_VISITED_MARKER.
+    // This loop is trivially parallelizable.
+    #pragma omp parallel for
+    for (int i = 0; i < graph->num_nodes; i++)
+    {
+        sol->distances[i] = NOT_VISITED_MARKER;
+    }
+
+    // Setup the root node.
+    sol->distances[ROOT_NODE_ID] = 0;
+
+    int current_distance = 0;
+    int nodes_in_frontier = 1; // Start with the root node in the frontier
+
+    // The main loop is sequential because each level of the BFS (each distance)
+    // must be fully computed before the next one can begin.
+    while (nodes_in_frontier > 0)
+    {
+        // The bottom_up_step function contains the parallel logic.
+        nodes_in_frontier = bottom_up_step(graph, current_distance, sol->distances);
+        current_distance++;
+    }
 }
 
 void bfs_hybrid(Graph graph, solution *sol)
