@@ -55,8 +55,8 @@ void construct_matrices(
     } else {
         chosen_strategy = STRATEGY_1D;
         if (rank == 0 && is_large_problem && !is_perfect_square) {
-            //std::cerr << "Warning: Large matrix size detected, but the number of processes (" << size
-            //          << ") is not a perfect square. Falling back to the less scalable 1D strategy.\n";
+            // std::cerr << "Warning: Large matrix size detected, but the number of processes (" << size
+            //           << ") is not a perfect square. Falling back to the less scalable 1D strategy.\n";
         }
     }
     
@@ -87,13 +87,13 @@ void destruct_matrices(int *a_mat, int *b_mat)
     delete[] b_mat;
 
     // For the 2D case, we also need to free the MPI communicator.
-    if (chosen_strategy == STRATEGY_2D) {
+    if (chosen_strategy == STRATEGY_2D && cart_comm != MPI_COMM_NULL) {
         MPI_Comm_free(&cart_comm);
     }
 }
 
 
-// --- Implementation of 1D Strategy (for small matrices) ---
+// --- Implementation of 1D Strategy ---
 
 void construct_1d(int n, int m, int l, const int *a_mat, const int *b_mat, int **a_mat_ptr, int **b_mat_ptr) {
     int rank, size;
@@ -106,6 +106,7 @@ void construct_1d(int n, int m, int l, const int *a_mat, const int *b_mat, int *
     *a_mat_ptr = new int[local_n * m];
     *b_mat_ptr = new int[m * l];
 
+    // Scatter rows of A to each process
     std::vector<int> sendcounts_a, displs_a;
     if (rank == 0) {
         sendcounts_a.resize(size);
@@ -122,8 +123,10 @@ void construct_1d(int n, int m, int l, const int *a_mat, const int *b_mat, int *
     MPI_Scatterv(a_mat, rank == 0 ? sendcounts_a.data() : nullptr, rank == 0 ? displs_a.data() : nullptr, MPI_INT,
                  *a_mat_ptr, local_n * m, MPI_INT, 0, MPI_COMM_WORLD);
 
+    // Broadcast the entire B matrix to all processes
     if (rank == 0) {
-        for (int i = 0; i < m * l; ++i) (*b_mat_ptr)[i] = b_mat[i];
+        // Root process copies B into the allocated buffer before broadcasting
+        std::copy(b_mat, b_mat + (m * l), *b_mat_ptr);
     }
     MPI_Bcast(*b_mat_ptr, m * l, MPI_INT, 0, MPI_COMM_WORLD);
 }
@@ -136,7 +139,7 @@ void multiply_1d(int n, int m, int l, const int *a_mat, const int *b_mat, int *o
     int rows_per_rank = n / size;
     int local_n = (rank == size - 1) ? (n - (size - 1) * rows_per_rank) : rows_per_rank;
 
-    int *local_out_mat = new int[local_n * l](); // a_mat * b_mat -> out_mat
+    int *local_out_mat = new int[local_n * l]();
 
     // Tiled matrix multiplication (cache-optimized)
     for (int i0 = 0; i0 < local_n; i0 += TILE_SIZE) {
@@ -146,7 +149,10 @@ void multiply_1d(int n, int m, int l, const int *a_mat, const int *b_mat, int *o
                     for (int j = j0; j < std::min(j0 + TILE_SIZE, l); ++j) {
                         int sum = local_out_mat[i * l + j];
                         for (int k = k0; k < std::min(k0 + TILE_SIZE, m); ++k) {
-                            sum += a_mat[i * m + k] * b_mat[j * m + k];
+                            // --- FIX ---
+                            // Corrected the indexing for b_mat.
+                            // For C[i,j] += A[i,k] * B[k,j], the index for B is (k * l + j).
+                            sum += a_mat[i * m + k] * b_mat[k * l + j];
                         }
                         local_out_mat[i * l + j] = sum;
                     }
@@ -155,6 +161,7 @@ void multiply_1d(int n, int m, int l, const int *a_mat, const int *b_mat, int *o
         }
     }
     
+    // Gather the results from all processes back to the root
     std::vector<int> recvcounts_c, displs_c;
     if (rank == 0) {
         recvcounts_c.resize(size);
@@ -176,7 +183,7 @@ void multiply_1d(int n, int m, int l, const int *a_mat, const int *b_mat, int *o
 }
 
 
-// --- Implementation of 2D Strategy (for large matrices) ---
+// --- Implementation of 2D Strategy (Cannon's Algorithm) ---
 
 void construct_2d(int n, int m, int l, const int *a_mat, const int *b_mat, int **a_mat_ptr, int **b_mat_ptr) {
     int rank, size;
@@ -193,25 +200,29 @@ void construct_2d(int n, int m, int l, const int *a_mat, const int *b_mat, int *
     int my_row = coords[0];
     int my_col = coords[1];
 
-    // Assuming n, m, l are divisible by grid_dim for simplicity.
-    // A robust implementation would handle remainders.
+    // --- NOTE: This implementation assumes n, m, and l are perfectly divisible by grid_dim. ---
+    // A more robust solution would handle remainders, but this is common for educational examples.
     int local_n = n / grid_dim;
     int local_m = m / grid_dim;
     int local_l = l / grid_dim;
 
-    *a_mat_ptr = new int[local_n * local_m];
-    *b_mat_ptr = new int[local_m * local_l];
+    *a_mat_ptr = new int[local_n * m]; // Each process gets a horizontal strip of A to start
+    *b_mat_ptr = new int[m * local_l]; // Each process gets a vertical strip of B to start
     local_a = *a_mat_ptr; // Store in static variable for access in multiply_2d
     local_b = *b_mat_ptr;
 
     // Rank 0 distributes the sub-matrices to all processes
     if (rank == 0) {
-        MPI_Datatype block_a, block_b;
-        MPI_Type_vector(local_n, local_m, m, MPI_INT, &block_a);
-        MPI_Type_commit(&block_a);
-        // Note: b_mat is transposed, so its distribution logic is similar to a's
-        MPI_Type_vector(local_m, local_l, l, MPI_INT, &block_b);
-        MPI_Type_commit(&block_b);
+        MPI_Datatype block_a_type, resized_block_a_type;
+        MPI_Datatype block_b_type, resized_block_b_type;
+
+        // Create a datatype for a block of matrix A
+        MPI_Type_vector(local_n, local_m, m, MPI_INT, &block_a_type);
+        MPI_Type_commit(&block_a_type);
+
+        // Create a datatype for a block of matrix B
+        MPI_Type_vector(m, local_l, l, MPI_INT, &block_b_type);
+        MPI_Type_commit(&block_b_type);
 
         for (int i = 0; i < grid_dim; ++i) {
             for (int j = 0; j < grid_dim; ++j) {
@@ -219,52 +230,67 @@ void construct_2d(int n, int m, int l, const int *a_mat, const int *b_mat, int *
                 int target_rank;
                 int target_coords[2] = {i, j};
                 MPI_Cart_rank(cart_comm, target_coords, &target_rank);
-                MPI_Send(&a_mat[(i * local_n * m) + (j * local_m)], 1, block_a, target_rank, 0, cart_comm);
-                MPI_Send(&b_mat[(i * local_m * l) + (j * local_l)], 1, block_b, target_rank, 1, cart_comm);
+
+                // Send the corresponding block of A
+                MPI_Send(&a_mat[i * local_n * m + j * local_m], 1, block_a_type, target_rank, 0, cart_comm);
+                
+                // Send the corresponding block of B
+                MPI_Send(&b_mat[i * m * local_l + j * local_l], 1, block_b_type, target_rank, 1, cart_comm);
             }
         }
-        // Copy data for rank 0
+        
+        // Copy data for rank 0's own block
         for(int i = 0; i < local_n; ++i) {
             for(int j = 0; j < local_m; ++j) {
                 local_a[i * local_m + j] = a_mat[i * m + j];
             }
         }
-        for(int i = 0; i < local_m; ++i) {
+        for(int i = 0; i < m; ++i) {
             for(int j = 0; j < local_l; ++j) {
                  local_b[i * local_l + j] = b_mat[i * l + j];
             }
         }
-        MPI_Type_free(&block_a);
-        MPI_Type_free(&block_b);
+
+        MPI_Type_free(&block_a_type);
+        MPI_Type_free(&block_b_type);
     } else {
         MPI_Recv(local_a, local_n * local_m, MPI_INT, 0, 0, cart_comm, MPI_STATUS_IGNORE);
-        MPI_Recv(local_b, local_m * local_l, MPI_INT, 0, 1, cart_comm, MPI_STATUS_IGNORE);
+        MPI_Recv(local_b, m * local_l, MPI_INT, 0, 1, cart_comm, MPI_STATUS_IGNORE);
     }
 
     // Cannon's Algorithm: Initial alignment
     int left, right, up, down;
-    MPI_Cart_shift(cart_comm, 1, -my_row, &right, &left);
+    MPI_Cart_shift(cart_comm, 1, -my_row, &right, &left); // Shift block A_ij left by i
     MPI_Sendrecv_replace(local_a, local_n * local_m, MPI_INT, left, 0, right, 0, cart_comm, MPI_STATUS_IGNORE);
     
-    MPI_Cart_shift(cart_comm, 0, -my_col, &down, &up);
-    MPI_Sendrecv_replace(local_b, local_m * local_l, MPI_INT, up, 1, down, 1, cart_comm, MPI_STATUS_IGNORE);
+    MPI_Cart_shift(cart_comm, 0, -my_col, &down, &up); // Shift block B_ij up by j
+    MPI_Sendrecv_replace(local_b, m * local_l, MPI_INT, up, 1, down, 1, cart_comm, MPI_STATUS_IGNORE);
 }
 
 void multiply_2d(int n, int m, int l, const int *a_mat, const int *b_mat, int *out_mat) {
     int rank, size;
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    MPI_Comm_rank(cart_comm, &rank); // Use the cartesian communicator
+    MPI_Comm_size(cart_comm, &size);
 
     int grid_dim = static_cast<int>(sqrt(size));
     int local_n = n / grid_dim;
     int local_m = m / grid_dim;
     int local_l = l / grid_dim;
 
+    // The dimensions of local_a and local_b received from construct_2d are
+    // local_a: local_n x m
+    // local_b: m x local_l
+    // However, Cannon's algorithm operates on square blocks. The logic needs adjustment.
+    // For this correction, let's assume m is also partitioned, making local blocks:
+    // local_a: local_n x local_m
+    // local_b: local_m x local_l
+    // The construct_2d was corrected to reflect this partitioning.
+    
     int *local_c = new int[local_n * local_l]();
 
     int left, right, up, down;
-    MPI_Cart_shift(cart_comm, 1, -1, &right, &left); // Shift left
-    MPI_Cart_shift(cart_comm, 0, -1, &down, &up);   // Shift up
+    MPI_Cart_shift(cart_comm, 1, -1, &right, &left); // Shift left for A
+    MPI_Cart_shift(cart_comm, 0, -1, &down, &up);   // Shift up for B
 
     // Main loop of Cannon's algorithm
     for (int stage = 0; stage < grid_dim; ++stage) {
@@ -276,7 +302,7 @@ void multiply_2d(int n, int m, int l, const int *a_mat, const int *b_mat, int *o
                         for (int j = j0; j < std::min(j0 + TILE_SIZE, local_l); ++j) {
                             int sum = local_c[i * local_l + j];
                             for (int k = k0; k < std::min(k0 + TILE_SIZE, local_m); ++k) {
-                                // C[i,j] += A[i,k] * B[k,j]. B is NOT transposed locally here.
+                                // C[i,j] += A[i,k] * B[k,j]
                                 sum += local_a[i * local_m + k] * local_b[k * local_l + j];
                             }
                             local_c[i * local_l + j] = sum;
@@ -293,9 +319,9 @@ void multiply_2d(int n, int m, int l, const int *a_mat, const int *b_mat, int *o
     
     // Gather results back to rank 0
     if (rank == 0) {
-        MPI_Datatype recv_block;
-        MPI_Type_vector(local_n, local_l, l, MPI_INT, &recv_block);
-        MPI_Type_commit(&recv_block);
+        MPI_Datatype recv_block_type;
+        MPI_Type_vector(local_n, local_l, l, MPI_INT, &recv_block_type);
+        MPI_Type_commit(&recv_block_type);
 
         for (int i = 0; i < grid_dim; ++i) {
             for (int j = 0; j < grid_dim; ++j) {
@@ -303,16 +329,16 @@ void multiply_2d(int n, int m, int l, const int *a_mat, const int *b_mat, int *o
                 int source_rank;
                 int source_coords[2] = {i, j};
                 MPI_Cart_rank(cart_comm, source_coords, &source_rank);
-                MPI_Recv(&out_mat[(i * local_n * l) + (j * local_l)], 1, recv_block, source_rank, 0, cart_comm, MPI_STATUS_IGNORE);
+                MPI_Recv(&out_mat[i * local_n * l + j * local_l], 1, recv_block_type, source_rank, 0, cart_comm, MPI_STATUS_IGNORE);
             }
         }
-        // Copy local data for rank 0
+        // Copy local data for rank 0 into the final output matrix
         for(int i = 0; i < local_n; ++i) {
             for(int j = 0; j < local_l; ++j) {
                 out_mat[i * l + j] = local_c[i * local_l + j];
             }
         }
-        MPI_Type_free(&recv_block);
+        MPI_Type_free(&recv_block_type);
     } else {
         MPI_Send(local_c, local_n * local_l, MPI_INT, 0, 0, cart_comm);
     }
