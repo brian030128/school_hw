@@ -1,11 +1,9 @@
 #include <mpi.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/types.h>
 #include <time.h>
+#include <sys/types.h>
 #include <unistd.h>
-
-#define SEED 12345678
 
 int main(int argc, char **argv)
 {
@@ -16,43 +14,46 @@ int main(int argc, char **argv)
     long long int tosses = atoi(argv[1]);
     int world_rank, world_size;
     // ---
-
-    // init MPI
+    
+    // TODO: init MPI
+    // Get the number of processes
     MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+    // Get the rank of the process
     MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
 
-    long long int number_in_circle = 0;
-    long long int iterations_per_process = tosses / world_size;
-    srand(world_rank * SEED);
+    // Count hit
+    long long int local_numOfhit = 0;
+    long long int local_numOftosses = tosses / world_size;
+    long long int global_numOfhit = 0;
+    
+    unsigned int seed = world_rank * time(0);
+    for (int i = 0;i < local_numOftosses;i++) {
+        float x = ((float) rand_r(&seed) / RAND_MAX) * 2.0 - 1.0;
+        float y = ((float) rand_r(&seed) / RAND_MAX) * 2.0 - 1.0;
 
-    for (long long int i = 0; i < iterations_per_process; i++) {
-        double x = (double)rand() / RAND_MAX;
-        double y = (double)rand() / RAND_MAX;
-        if (x * x + y * y <= 1.0) {
-            number_in_circle++;
-        }
+        if (x*x + y*y <= 1.0)
+            local_numOfhit++;
     }
+    
     if (world_rank > 0)
     {
-        // Workers send their intermediate count to the master process (rank 0)
-        MPI_Send(&number_in_circle, 1, MPI_LONG_LONG, 0, 0, MPI_COMM_WORLD);
+        // TODO: handle workers
+        MPI_Send(&local_numOfhit, 1, MPI_LONG_LONG_INT, 0, 0, MPI_COMM_WORLD);
     }
     else if (world_rank == 0)
     {
-        // Master process receives intermediate counts from all workers
-        long long int total_number_in_circle = number_in_circle;
-        long long int received_count;
-        for (int i = 1; i < world_size; i++) {
-            MPI_Recv(&received_count, 1, MPI_LONG_LONG, i, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            total_number_in_circle += received_count;
+        // TODO: master
+        global_numOfhit += local_numOfhit;
+        for (int i = 1;i < world_size;i++) {
+            MPI_Recv(&local_numOfhit, 1, MPI_LONG_LONG_INT, MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            global_numOfhit += local_numOfhit;
         }
-        number_in_circle = total_number_in_circle;
     }
 
     if (world_rank == 0)
     {
-        // Process PI result
-        pi_result = 4.0 * number_in_circle / (double)tosses;
+        // TODO: process PI result
+        pi_result = 4.0 * (global_numOfhit / (double)tosses);
 
         // --- DON'T TOUCH ---
         double end_time = MPI_Wtime();
