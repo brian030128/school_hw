@@ -26,8 +26,8 @@ int main(int argc, char **argv)
     unsigned int seed = world_rank * time(0);
 
     for (long long int i = 0; i < iterations_per_process; i++) {
-        double x = (double)r_rand(&seed) / RAND_MAX;
-        double y = (double)r_rand(&seed) / RAND_MAX;
+        double x = (double)rand_r(&seed) / RAND_MAX;
+        double y = (double)rand_r(&seed) / RAND_MAX;
         if (x * x + y * y <= 1.0) {
             number_in_circle++;
         }
