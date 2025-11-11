@@ -24,12 +24,12 @@ int main(int argc, char **argv)
     long long int number_in_circle = 0;
     
     // Seed the random number generator uniquely for each process.
-    srand(time(NULL) + world_rank);
+    unsigned int seed = world_rank * time(0);
 
     for (long long int i = 0; i < tosses_per_process; i++)
     {
-        double x = (double)rand() / RAND_MAX;
-        double y = (double)rand() / RAND_MAX;
+        double x = (double)rand_r(&seed) / RAND_MAX;
+        double y = (double)rand_r(&seed) / RAND_MAX;
         double distance_squared = x * x + y * y;
         if (distance_squared <= 1)
         {

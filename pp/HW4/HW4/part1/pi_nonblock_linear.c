@@ -23,13 +23,13 @@ int main(int argc, char **argv)
     long long int local_number_in_circle = 0;
 
     // Seed the random number generator to get different results for each process
-    srand(time(NULL) * (world_rank + 1));
+    unsigned int seed = world_rank * time(0);
 
     // Perform Monte Carlo simulation for the local number of tosses
     for (long long int toss = 0; toss < num_tosses_per_process; toss++)
     {
-        double x = (double)rand() / RAND_MAX * 2.0 - 1.0;
-        double y = (double)rand() / RAND_MAX * 2.0 - 1.0;
+        double x = (double)rand_r(&seed) / RAND_MAX * 2.0 - 1.0;
+        double y = (double)rand_r(&seed) / RAND_MAX * 2.0 - 1.0;
         double distance_squared = x * x + y * y;
         if (distance_squared <= 1.0)
         {
