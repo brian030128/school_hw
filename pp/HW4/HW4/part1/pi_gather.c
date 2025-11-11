@@ -23,11 +23,11 @@ int main(int argc, char **argv)
 
     long long int number_in_circle = 0;
     long long int iterations_per_process = tosses / world_size;
-    srand(world_rank * SEED);
+    unsigned int seed = world_rank * time(0);
 
     for (long long int i = 0; i < iterations_per_process; i++) {
-        double x = (double)rand() / RAND_MAX;
-        double y = (double)rand() / RAND_MAX;
+        double x = (double)rand_r(&seed) / RAND_MAX;
+        double y = (double)rand_r(&seed) / RAND_MAX;
         if (x * x + y * y <= 1.0) {
             number_in_circle++;
         }
