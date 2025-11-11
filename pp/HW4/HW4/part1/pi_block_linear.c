@@ -5,6 +5,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#define SEED 12345678
+
 int main(int argc, char **argv)
 {
     // --- DON'T TOUCH ---
@@ -16,9 +18,7 @@ int main(int argc, char **argv)
     // ---
 
     // init MPI
-    int world_size;
     MPI_Comm_size(MPI_COMM_WORLD, &world_size);
-    int world_rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
 
     long long int number_in_circle = 0;
