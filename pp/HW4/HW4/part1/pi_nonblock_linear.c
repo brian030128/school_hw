@@ -11,7 +11,7 @@ int main(int argc, char **argv)
     MPI_Init(&argc, &argv);
     double start_time = MPI_Wtime();
     double pi_result;
-    long long int tosses = atoll(argv[1]);
+    long long int tosses = atoi(argv[1]);
     int world_rank, world_size;
     // ---
 
@@ -19,74 +19,67 @@ int main(int argc, char **argv)
     MPI_Comm_size(MPI_COMM_WORLD, &world_size);
     MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
 
-    // Each process calculates its own partial number of points in the circle
-    long long int local_tosses = tosses / world_size;
+    long long int num_tosses_per_process = tosses / world_size;
     long long int local_number_in_circle = 0;
-    
-    // Seed the random number generator to be unique for each process
-    srand(time(NULL) + world_rank);
 
-    for (long long int toss = 0; toss < local_tosses; toss++) {
-        double x = (double)rand() / RAND_MAX;
-        double y = (double)rand() / RAND_MAX;
+    // Seed the random number generator to get different results for each process
+    srand(time(NULL) * (world_rank + 1));
+
+    // Perform Monte Carlo simulation for the local number of tosses
+    for (long long int toss = 0; toss < num_tosses_per_process; toss++)
+    {
+        double x = (double)rand() / RAND_MAX * 2.0 - 1.0;
+        double y = (double)rand() / RAND_MAX * 2.0 - 1.0;
         double distance_squared = x * x + y * y;
-        if (distance_squared <= 1) {
+        if (distance_squared <= 1.0)
+        {
             local_number_in_circle++;
         }
     }
 
-    if (world_rank == 0) {
+    if (world_rank > 0)
+    {
+        // MPI workers: Send their local count to the master process (rank 0)
+        MPI_Send(&local_number_in_circle, 1, MPI_LONG_LONG, 0, 0, MPI_COMM_WORLD);
+    }
+    else if (world_rank == 0)
+    {
         long long int total_number_in_circle = local_number_in_circle;
 
-        // --- TODO: Non-blocking receives ---
-        // Allocate arrays for requests and the received data from worker processes.
-        MPI_Request* requests = (MPI_Request*)malloc(sizeof(MPI_Request) * (world_size - 1));
-        long long int* received_counts = (long long int*)malloc(sizeof(long long int) * (world_size - 1));
+        // non-blocking MPI communication.
+        // If there is more than one process, receive results from workers.
+        if (world_size > 1) {
+            // Allocate arrays for requests and received data from worker nodes
+            MPI_Request* requests = (MPI_Request*)malloc(sizeof(MPI_Request) * (world_size - 1));
+            long long int* recv_counts = (long long int*)malloc(sizeof(long long int) * (world_size - 1));
+            
+            // Issue non-blocking receives for all worker processes
+            for (int i = 1; i < world_size; i++)
+            {
+                MPI_Irecv(&recv_counts[i - 1], 1, MPI_LONG_LONG, i, 0, MPI_COMM_WORLD, &requests[i - 1]);
+            }
 
-        // Issue a non-blocking receive for each worker process (ranks 1 to world_size-1).
-        for (int i = 1; i < world_size; i++) {
-            MPI_Irecv(
-                &received_counts[i - 1], // Buffer for incoming data from rank i
-                1,                       // Count of elements
-                MPI_LONG_LONG,           // Datatype of the elements
-                i,                       // Source rank
-                0,                       // Message tag
-                MPI_COMM_WORLD,          // Communicator
-                &requests[i - 1]         // MPI_Request handle
-            );
+            // Wait for all non-blocking receives to complete
+            MPI_Waitall(world_size - 1, requests, MPI_STATUSES_IGNORE);
+
+            // Aggregate the results from all workers
+            for (int i = 0; i < world_size - 1; i++)
+            {
+                total_number_in_circle += recv_counts[i];
+            }
+            
+            // Clean up allocated memory
+            free(requests);
+            free(recv_counts);
         }
 
-        // Wait for all the non-blocking receive operations to complete.
-        MPI_Waitall(world_size - 1, requests, MPI_STATUSES_IGNORE);
-
-        // Aggregate the results from all workers.
-        for (int i = 0; i < world_size - 1; i++) {
-            total_number_in_circle += received_counts[i];
-        }
-
-        // Clean up allocated memory
-        free(requests);
-        free(received_counts);
-        // ---
-
-        // PI result
+        // PI result calculation
         pi_result = 4.0 * total_number_in_circle / ((double)tosses);
 
         // --- DON'T TOUCH ---
         double end_time = MPI_Wtime();
         printf("%lf\n", pi_result);
         printf("MPI running time: %lf Seconds\n", end_time - start_time);
-        // ---
-    } else {
-        // --- TODO: All other ranks send their results to rank 0 ---
-        MPI_Send(
-            &local_number_in_circle, // Data to send
-            1,                       // Count of elements
-            MPI_LONG_LONG,           // Datatype
-            0,                       // Destination rank (root)
-            0,                       // Message tag
-            MPI_COMM_WORLD           // Communicator
-        );
         // ---
     }
 
