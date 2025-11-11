@@ -54,7 +54,7 @@ int main(int argc, char **argv)
         free(gather_buffer);
 
         // Process PI result
-        pi_result = 4.0 * total_number_in_circle / (double)tasses;
+        pi_result = 4.0 * total_number_in_circle / (double)tosses;
 
         // --- DON'T TOUCH ---
         double end_time = MPI_Wtime();
