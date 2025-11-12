@@ -23,7 +23,6 @@ int main(int argc, char **argv)
     long long int tosses_per_process = tosses / world_size;
     long long int number_in_circle = 0;
     
-    // Seed the random number generator uniquely for each process.
     unsigned int seed = world_rank * time(0);
 
     for (long long int i = 0; i < tosses_per_process; i++)
@@ -52,11 +51,10 @@ int main(int argc, char **argv)
             break;
         }
         // A process is a "receiver" if its rank is the base of a sub-group.
-        // The condition (world_rank % (2 * distance)) == 0 identifies these processes.
         else if ((world_rank % (2 * distance)) == 0)
         {
             // The receiver must ensure its sending partner exists.
-            // This is always true in a power-of-two scenario but is good practice.
+            // Though is always true in this assignment.
             int source = world_rank + distance;
             if (source < world_size)
             {

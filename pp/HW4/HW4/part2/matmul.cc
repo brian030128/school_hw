@@ -4,11 +4,9 @@
 #include <algorithm> // For std::min and std::copy
 
 // TILE_SIZE is chosen to ensure the working set of three tiles (from A, B, and C)
-// fits comfortably within the L1d cache.
+// fits within the L1d cache.
 // 3 * (128 * 128) * sizeof(int) = 192 KiB.
 constexpr int TILE_SIZE = 128;
-
-// --- construct_matrices and destruct_matrices remain unchanged ---
 
 void construct_matrices(
     int n, int m, int l, const int *a_mat, const int *b_mat, int **a_mat_ptr, int **b_mat_ptr)
@@ -61,9 +59,7 @@ void matrix_multiply(
 
     std::vector<int> local_out_mat(local_n * l, 0);
 
-    // Perform tiled matrix multiplication using the standard, high-performance i0-j0-k0 loop order.
-    // This order maximizes cache reuse for the result matrix (local_out_mat), which is critical
-    // because it involves both reads and writes.
+
     for (int i0 = 0; i0 < local_n; i0 += TILE_SIZE) {
         for (int j0 = 0; j0 < l; j0 += TILE_SIZE) {
             // The two outer loops select a single tile from the C matrix (local_out_mat).
@@ -73,15 +69,10 @@ void matrix_multiply(
                 // to fully compute the selected C tile.
                 for (int i = i0; i < std::min(i0 + TILE_SIZE, local_n); ++i) {
                     for (int j = j0; j < std::min(j0 + TILE_SIZE, l); ++j) {
-                        // The `sum` variable is crucial. It accumulates the dot-product result
-                        // in a CPU register, avoiding repeated memory access to local_out_mat[i*l+j].
                         int sum = local_out_mat[i * l + j];
                         for (int k = k0; k < std::min(k0 + TILE_SIZE, m); ++k) {
-                            // Accessing b_mat (B-transposed) this way ensures sequential reads,
-                            // which is optimal for cache performance.
                             sum += a_mat[i * m + k] * b_mat[j * m + k];
                         }
-                        // The final result is written back to memory only once after the k-loop completes.
                         local_out_mat[i * l + j] = sum;
                     }
                 }
@@ -89,7 +80,6 @@ void matrix_multiply(
         }
     }
 
-    // --- Gatherv logic remains unchanged ---
     std::vector<int> recvcounts_c(size);
     std::vector<int> displs_c(size);
 
