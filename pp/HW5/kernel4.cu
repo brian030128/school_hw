@@ -1,72 +1,141 @@
+#include <cstdio>
+#include <cstdlib>
 #include <cuda.h>
-#include <stdio.h>
-#include <stdlib.h>
+#include <cuda_runtime.h>
 
-#define BLOCK_SIZE 8
-#define STREAM_NUM 15
+// CUDA Kernel: Each thread calculates the value for one pixel
+__global__ void mandel_kernel(float lower_x, float lower_y, 
+                              float step_x, float step_y, 
+                              int res_x, int res_y, 
+                              int max_iterations, 
+                              int *output)
+{
+    // Calculate global thread index (thisX, thisY)
+    int thisX = blockIdx.x * blockDim.x + threadIdx.x;
+    int thisY = blockIdx.y * blockDim.y + threadIdx.y;
 
-__global__ void mandelKernel(const float x0, const float y0,
-                             const float dx, const float dy,
-                             const int width, const int row_offset,
-                             const int count,
-                             int *const d_img) {
-  // To avoid error caused by the floating number, use the following pseudo code
-  //
-  // float x = lowerX + thisX * stepX;
-  // float y = lowerY + thisY * stepY;
+    // Boundary check: ensure the thread is within the image dimensions
+    if (thisX >= res_x || thisY >= res_y)
+        return;
 
-  int loop_i = blockIdx.x * blockDim.x + threadIdx.x;
-  int loop_j = blockIdx.y * blockDim.y + threadIdx.y + row_offset;
+    // Calculate 1D index from 2D coordinates
+    int index = (thisY * res_x) + thisX;
 
-  const float2 c = make_float2(x0 + loop_i * dx, y0 + loop_j * dy);
-  float2 z = c;
-  float2 new_z;
+    // Calculate the complex coordinates for this pixel
+    float c_re = lower_x + thisX * step_x;
+    float c_im = lower_y + thisY * step_y;
 
-  int i;
-  for (i = 0; i < count; ++i) {
+    // --- EARLY STOPPING 1: Geometric Checks ---
+    // Check if point is in the Main Cardioid
+    // Formula: q * (q + (x - 1/4)) < 1/4 * y^2, where q = (x - 1/4)^2 + y^2
+    float x_minus_quarter = c_re - 0.25f;
+    float y_sq = c_im * c_im;
+    float q = x_minus_quarter * x_minus_quarter + y_sq;
+    if (q * (q + x_minus_quarter) < 0.25f * y_sq)
+    {
+        output[index] = max_iterations;
+        return;
+    }
 
-    if (z.x * z.x + z.y * z.y > 4.f)
-      break;
+    // Check if point is in the Period-2 Bulb
+    // Formula: (x + 1)^2 + y^2 < 1/16
+    float x_plus_one = c_re + 1.0f;
+    if (x_plus_one * x_plus_one + y_sq < 0.0625f)
+    {
+        output[index] = max_iterations;
+        return;
+    }
+    // ------------------------------------------
 
-    new_z.x = z.x * z.x - z.y * z.y;
-    new_z.y = 2.f * z.x * z.y;
-    z.x = c.x + new_z.x;
-    z.y = c.y + new_z.y;
-  }
+    // Initialize z
+    float z_re = c_re;
+    float z_im = c_im;
 
-  // int index = (loop_j * width + loop_i);
-  d_img[loop_j * width + loop_i] = i;
+    // Variables for Periodicity Checking (Cycle Detection)
+    float old_re = z_re;
+    float old_im = z_im;
+    int period = 20; // Start checking after a few iterations
+    int period_counter = 0;
+
+    int i;
+    for (i = 0; i < max_iterations; ++i)
+    {
+        // 1. Divergence Check (Standard)
+        if (z_re * z_re + z_im * z_im > 4.f)
+            break;
+
+        // 2. Calculation
+        float new_re = (z_re * z_re) - (z_im * z_im);
+        float new_im = 2.f * z_re * z_im;
+        z_re = c_re + new_re;
+        z_im = c_im + new_im;
+
+        // --- EARLY STOPPING 2: Periodicity Check ---
+        // If the current Z is identical to a previous Z, we are in a loop (inside the set).
+        if (z_re == old_re && z_im == old_im)
+        {
+            i = max_iterations; // Set to max to indicate membership
+            break;
+        }
+
+        // Update the "history" value using period doubling strategy.
+        // We verify against the old value for 'period' iterations, 
+        // then update the old value and double the period.
+        period_counter++;
+        if (period_counter >= period)
+        {
+            old_re = z_re;
+            old_im = z_im;
+            period_counter = 0;
+            period *= 2; // Double the check interval
+        }
+        // -------------------------------------------
+    }
+
+    // Write the iteration count to the output buffer
+    output[index] = i;
 }
 
-// Host front-end function that allocates the memory and launches the GPU kernel
-void host_fe(float upperX, float upperY, float lowerX, float lowerY, int *img, int resX, int resY, int maxIterations) {
-  float stepX = (upperX - lowerX) / resX;
-  float stepY = (upperY - lowerY) / resY;
+// Host front-end function
+void host_fe(float upper_x,
+             float upper_y,
+             float lower_x,
+             float lower_y,
+             int *img,
+             int res_x,
+             int res_y,
+             int max_iterations)
+{
+    // Calculate the step size per pixel
+    float step_x = (upper_x - lower_x) / (float)res_x;
+    float step_y = (upper_y - lower_y) / (float)res_y;
 
-  const int size = resX * resY * sizeof(int);
-  cudaHostRegister(img, size, cudaHostRegisterDefault);
-  int *d_img;
-  cudaHostGetDevicePointer(&d_img, img, 0);
+    // Calculate total number of pixels and memory size
+    int num_pixels = res_x * res_y;
+    size_t mem_size = num_pixels * sizeof(int);
 
-  cudaStream_t streams[STREAM_NUM];
-  for (int i = 0; i < STREAM_NUM; i++) {
-    cudaStreamCreateWithFlags(&streams[i], cudaStreamNonBlocking);
-  }
+    // Allocate device memory
+    int *d_img;
+    cudaMalloc((void **)&d_img, mem_size);
 
-  const int stream_row_size = resY / STREAM_NUM;
+    // Configure CUDA Kernel Grid and Block dimensions
+    dim3 blockSize(16, 16);
+    dim3 gridSize((res_x + blockSize.x - 1) / blockSize.x,
+                  (res_y + blockSize.y - 1) / blockSize.y);
 
-  dim3 block(BLOCK_SIZE, BLOCK_SIZE);
-  dim3 grid(resX / block.x, stream_row_size / block.y);
+    // Launch the kernel
+    mandel_kernel<<<gridSize, blockSize>>>(lower_x, lower_y, step_x, step_y, 
+                                           res_x, res_y, max_iterations, d_img);
 
-  int row_offset = 0;
-  for (int i = 0; i < STREAM_NUM; i++) {
-    mandelKernel<<<grid, block, 0, streams[i]>>>(lowerX, lowerY, stepX, stepY, resX, row_offset, maxIterations, d_img);
-    row_offset += stream_row_size;
-  }
+    // Check for kernel launch errors
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        printf("CUDA Error: %s\n", cudaGetErrorString(err));
+    }
 
-  cudaDeviceSynchronize();
-  for (int i = 0; i < STREAM_NUM; i++) {
-    cudaStreamDestroy(streams[i]);
-  }
-  cudaHostUnregister(img);
+    // Copy result from Device (GPU) to Host (CPU)
+    cudaMemcpy(img, d_img, mem_size, cudaMemcpyDeviceToHost);
+
+    // Free device memory
+    cudaFree(d_img);
 }

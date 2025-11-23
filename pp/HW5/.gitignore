@@ -1,3 +1,4 @@
 objs
 mandelbrot
 *.ncu-rep
+*.ppm
