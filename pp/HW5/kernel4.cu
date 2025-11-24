@@ -10,11 +10,11 @@ __global__ void mandel_kernel(float lower_x, float lower_y,
                               int max_iterations, 
                               int *output)
 {
-    // Calculate global thread index (thisX, thisY)
+    // Calculate global thread index
     int thisX = blockIdx.x * blockDim.x + threadIdx.x;
     int thisY = blockIdx.y * blockDim.y + threadIdx.y;
 
-    // Boundary check: ensure the thread is within the image dimensions
+    // Boundary check
     if (thisX >= res_x || thisY >= res_y)
         return;
 
@@ -89,10 +89,8 @@ __global__ void mandel_kernel(float lower_x, float lower_y,
             period_counter = 0;
             period *= 2; // Double the check interval
         }
-        // -------------------------------------------
     }
 
-    // Write the iteration count to the output buffer
     output[index] = i;
 }
 
@@ -106,11 +104,9 @@ void host_fe(float upper_x,
              int res_y,
              int max_iterations)
 {
-    // Calculate the step size per pixel
     float step_x = (upper_x - lower_x) / (float)res_x;
     float step_y = (upper_y - lower_y) / (float)res_y;
 
-    // Calculate total number of pixels and memory size
     int num_pixels = res_x * res_y;
     size_t mem_size = num_pixels * sizeof(int);
 
@@ -118,8 +114,7 @@ void host_fe(float upper_x,
     int *d_img;
     cudaMalloc((void **)&d_img, mem_size);
 
-    // Configure CUDA Kernel Grid and Block dimensions
-    dim3 blockSize(16, 16);
+    dim3 blockSize(8, 8);
     dim3 gridSize((res_x + blockSize.x - 1) / blockSize.x,
                   (res_y + blockSize.y - 1) / blockSize.y);
 
@@ -127,15 +122,6 @@ void host_fe(float upper_x,
     mandel_kernel<<<gridSize, blockSize>>>(lower_x, lower_y, step_x, step_y, 
                                            res_x, res_y, max_iterations, d_img);
 
-    // Check for kernel launch errors
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        printf("CUDA Error: %s\n", cudaGetErrorString(err));
-    }
-
-    // Copy result from Device (GPU) to Host (CPU)
     cudaMemcpy(img, d_img, mem_size, cudaMemcpyDeviceToHost);
-
-    // Free device memory
     cudaFree(d_img);
 }

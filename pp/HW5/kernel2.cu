@@ -92,12 +92,6 @@ void host_fe(float upper_x,
                                            res_x, res_y, max_iterations, 
                                            pitch, d_img);
 
-    // Check for kernel launch errors
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        printf("CUDA Error: %s\n", cudaGetErrorString(err));
-    }
-
     // Copy result from Device (GPU) to Host Pinned Memory
     // We use cudaMemcpy2D because the device memory is pitched (padded),
     // but the host memory is linear (packed).

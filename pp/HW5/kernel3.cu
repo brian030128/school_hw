@@ -23,7 +23,6 @@ __global__ void mandel_kernel(float lower_x, float lower_y,
     int strideY = blockDim.y * gridDim.y;
 
     // 3. Loop over the image (Grid-Stride)
-    // If the image is larger than the grid, the loops will execute multiple times.
     for (int y = startY; y < res_y; y += strideY)
     {
         // Get the pointer to the start of this specific row
@@ -52,7 +51,6 @@ __global__ void mandel_kernel(float lower_x, float lower_y,
             }
 
             // Write result to pitched global memory
-            // No need for y calculation here, we already have the row pointer
             row_ptr[x] = i;
         }
     }
@@ -99,11 +97,6 @@ void host_fe(float upper_x,
     mandel_kernel<<<gridSize, blockSize>>>(lower_x, lower_y, step_x, step_y, 
                                            res_x, res_y, max_iterations, 
                                            pitch, d_img);
-
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        printf("CUDA Error: %s\n", cudaGetErrorString(err));
-    }
 
     // 4. Copy from Device (Pitched) to Host Pinned (Linear)
     // This un-pads the memory automatically.

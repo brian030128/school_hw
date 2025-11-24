@@ -77,12 +77,6 @@ void host_fe(float upper_x,
     mandel_kernel<<<gridSize, blockSize>>>(lower_x, lower_y, step_x, step_y, 
                                            res_x, res_y, max_iterations, d_img);
 
-    // Check for kernel launch errors (optional but recommended)
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        printf("CUDA Error: %s\n", cudaGetErrorString(err));
-    }
-
     // Copy result from Device (GPU) to Host (CPU)
     // 'img' is the pointer to the host memory passed into this function
     cudaMemcpy(img, d_img, mem_size, cudaMemcpyDeviceToHost);
