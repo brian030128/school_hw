@@ -15,4 +15,49 @@ void host_fe(int filter_width,
 {
     cl_int status;
     int filter_size = filter_width * filter_width;
+    int image_size = image_height * image_width;
+    
+    // Create command queue
+    cl_command_queue queue = clCreateCommandQueue(*context, *device, 0, &status);
+    
+    // Create memory buffers
+    cl_mem filter_buf = clCreateBuffer(*context, CL_MEM_READ_ONLY, 
+                                       filter_size * sizeof(float), NULL, &status);
+    cl_mem input_buf = clCreateBuffer(*context, CL_MEM_READ_ONLY, 
+                                      image_size * sizeof(float), NULL, &status);
+    cl_mem output_buf = clCreateBuffer(*context, CL_MEM_WRITE_ONLY, 
+                                       image_size * sizeof(float), NULL, &status);
+    
+    // Write data to buffers
+    status = clEnqueueWriteBuffer(queue, filter_buf, CL_TRUE, 0, 
+                                  filter_size * sizeof(float), filter, 0, NULL, NULL);
+    status = clEnqueueWriteBuffer(queue, input_buf, CL_TRUE, 0, 
+                                  image_size * sizeof(float), input_image, 0, NULL, NULL);
+    
+    // Create kernel
+    cl_kernel kernel = clCreateKernel(*program, "convolution", &status);
+    
+    // Set kernel arguments
+    status = clSetKernelArg(kernel, 0, sizeof(cl_mem), &input_buf);
+    status = clSetKernelArg(kernel, 1, sizeof(cl_mem), &output_buf);
+    status = clSetKernelArg(kernel, 2, sizeof(cl_mem), &filter_buf);
+    status = clSetKernelArg(kernel, 3, sizeof(int), &filter_width);
+    status = clSetKernelArg(kernel, 4, sizeof(int), &image_width);
+    status = clSetKernelArg(kernel, 5, sizeof(int), &image_height);
+    
+    // Execute kernel
+    size_t global_work_size[2] = {image_width, image_height};
+    status = clEnqueueNDRangeKernel(queue, kernel, 2, NULL, global_work_size, 
+                                    NULL, 0, NULL, NULL);
+    
+    // Read results
+    status = clEnqueueReadBuffer(queue, output_buf, CL_TRUE, 0, 
+                                 image_size * sizeof(float), output_image, 0, NULL, NULL);
+    
+    // Cleanup
+    clReleaseMemObject(filter_buf);
+    clReleaseMemObject(input_buf);
+    clReleaseMemObject(output_buf);
+    clReleaseKernel(kernel);
+    clReleaseCommandQueue(queue);
 }
